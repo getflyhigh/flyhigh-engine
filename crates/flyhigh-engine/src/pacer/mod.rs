@@ -417,6 +417,8 @@ struct Prev {
     id: u32,
     /// Whether the interval ending at this frame may be interpolated.
     interpolate: bool,
+    /// How long the interval ending at this frame is on the schedule clock.
+    span_ms: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -1292,7 +1294,7 @@ impl Pacer {
             IntervalKind::Hold => self.counters.holds += 1,
             IntervalKind::Motion => self.source.note_unique(now),
         }
-        let cur = Prev { id: frame.id, interpolate: frame.kind == IntervalKind::Motion };
+        let cur = Prev { id: frame.id, interpolate: frame.kind == IntervalKind::Motion, span_ms: interval };
         let Some(prev) = self.prev else {
             if cadence_mode {
                 self.enqueue_source(frame.id, src_at);
@@ -1373,11 +1375,14 @@ impl Pacer {
                 // the Stream's cadence logic and then replaces the queued source frame.
                 if let Some(p2) = self.prev2 {
                     if prev.interpolate {
-                        let at = sched_t - 2.0 * interval + self.delay_ms;
+                        // the pair is as long as the clock's step was when its second frame came, not as the step now:
+                        // spread over the current one, its in-betweens sat 7.2 to 9.5 ms apart at x5 and off their
+                        // frames (8 % of the pictures off pace on a pan)
+                        let at = sched_t - interval - prev.span_ms + self.delay_ms;
                         let mut requests = vec![self.request(p2.id, prev.id, 0.0, at, true, probe)];
                         for k in 1..n {
                             let t = k as f64 / n as f64;
-                            requests.push(self.request(p2.id, prev.id, t, at + t * interval, false, probe));
+                            requests.push(self.request(p2.id, prev.id, t, at + t * prev.span_ms, false, probe));
                         }
                         self.job = Some(Job { requests, next: 0 });
                     }

@@ -35,6 +35,13 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
   change of plan): at once now, 0.5 s to 0.1 s at 24 fps.
 - A seek or a change of speed threw the decoded cadence away, eight frames without in-betweens while it was
   relearned (1.2 s after a change of speed). It is kept.
+- Video mode (the lookahead, cadence re-timing): the in-betweens of a pair were spread over the clock's step of the
+  frame after it, 7.2 to 9.5 ms apart at x5 and off their frames; they take their own pair's span (a 24 fps pan,
+  x5 on 240 Hz: 18.7 % of the pictures off pace to 2.2 %).
+- The browser `CostSampler` timed every 30th generate, and in video mode, where an interval's requests start with the
+  re-timing of a real frame, a stride over 2 or 5 requests only ever met those, which have no cost: the frame cost
+  was never measured and Auto stayed on the seed. A sample that did not land (nothing written, or refused in a settle
+  window) is taken again on the next call.
 - `settle_active` in the report was false before the first tick, so a host measuring its GPU costs once measured
   inside the settle window, had the samples refused and stayed on the 10 ms seed (the reference player: x4 instead
   of x5 in about one run in four). The report is right from the first event, and the player measures until taken.
