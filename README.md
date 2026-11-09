@@ -7,7 +7,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-3b82f6?style=flat-square)](LICENSE)
 [![Weights: CC BY-NC 4.0](https://img.shields.io/badge/weights-CC%20BY--NC%204.0-7c3aed?style=flat-square)](models/WEIGHTS_LICENSE.md)
 [![Releases](https://img.shields.io/badge/releases-page-444?style=flat-square)](https://github.com/getflyhigh/flyhigh-engine/releases)
-[![Built on FlyHigh](https://img.shields.io/badge/built%20on-FlyHigh-19c37d?style=flat-square)](https://github.com/topics/flyhigh-engine)
+[![Uses FlyHigh](https://img.shields.io/badge/uses-FlyHigh-19c37d?style=flat-square)](docs/projects.md)
 [![Ko-fi](https://img.shields.io/badge/support-ko--fi-ff5e5b?style=flat-square)](https://ko-fi.com/monzikxd)
 [![Compute by CloudRift](assets/cloudrift.svg)](https://cloudrift.ai)
 
@@ -200,15 +200,14 @@ Tests, CLI tools, developer settings: [development](docs/development.md). How th
 Status: 0.x. The Rust API follows [ARCHITECTURE.md](ARCHITECTURE.md) and may still change; the C ABI and the
 JavaScript classes change additively. What changed is in the [changelog](CHANGELOG.md).
 
-## Built on FlyHigh
-
-Projects that run on the engine carry the GitHub topic
-[`flyhigh-engine`](https://github.com/topics/flyhigh-engine); add it to yours to be listed there.
+## Projects using FlyHigh
 
 - **[Framegen](https://github.com/MONZikWasTaken/Framegen)**: a browser extension that generates frames for any
   `<video>` on a page (Chrome, Firefox); the first host written on the engine's classes alone.
 - **[OpenNOW](https://github.com/OpenCloudGaming/OpenNOW)**: an open-source cloud gaming client whose frame
   generation runs on the engine: in-betweens for the game stream in the native client.
+
+[See all projects](docs/projects.md)
 
 ## Weights
 

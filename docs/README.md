@@ -15,4 +15,5 @@ Start with the guide for your platform, then [options.md](options.md) when you w
 | [model-format.md](model-format.md) | the model files (`graph.json`, manifest, weight blob) and how to ship another checkpoint |
 | [development.md](development.md) | building, the CLI tools, tests and parity fixtures, developer environment variables |
 | [decisions.md](decisions.md) | the decision records: what was decided, when and why |
+| [projects.md](projects.md) | the apps that use the engine, and how to add yours |
 | [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md), [CHANGELOG.md](../CHANGELOG.md) | how to build, check and contribute; how to report a vulnerability; what changed |
