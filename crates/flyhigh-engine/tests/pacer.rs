@@ -252,6 +252,34 @@ fn auto_keeps_to_the_display_cadence_above_half_its_rate() {
 }
 
 #[test]
+fn the_drop_penalty_steps_along_the_even_factors() {
+    use flyhigh_engine::pacer::rate::{auto_factor, AutoInputs};
+    let inputs = |source_hz: f64, display_hz: f64, penalty: u32| AutoInputs {
+        max_factor: 6,
+        mid_cost_ms: 0.3,
+        pair_cost_ms: 1.5,
+        source_hz,
+        unique_interval_ms: 1000.0 / source_hz,
+        wall_interval_ms: 1000.0 / source_hz,
+        display_capacity_hz: display_hz,
+        display_hz,
+        even_cadence: true,
+        cadence_hz: source_hz,
+        limit_to_display: true,
+        queue_capacity_hz: f64::INFINITY,
+        headroom: 0.97,
+        motion_avg: 10.0,
+        motion_adaptive: true,
+        penalty,
+    };
+    let f = |s, d, p| auto_factor(&inputs(s, d, p)).factor;
+    // 60 fps on 240 Hz: x4, then x2 (x3 would judder), then x1
+    assert_eq!((f(60.0, 240.0, 0), f(60.0, 240.0, 1), f(60.0, 240.0, 2)), (4, 2, 1));
+    // 24 fps on 120 Hz has no even factor between x5 and x1: one step at a time
+    assert_eq!((f(24.0, 120.0, 0), f(24.0, 120.0, 1)), (5, 4));
+}
+
+#[test]
 fn firefox_stalls_are_not_charged_to_auto() {
     // 60 Hz ticks with a 70 ms compositor stall every 1.5 s, the host's 7 ms present limit in force
     let trace = synth(15_000.0, 24.0, 2.0, 3.0, |t| if t.rem_euclid(1500.0) < 16.7 { 70.0 } else { 1000.0 / 60.0 });

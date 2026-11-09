@@ -362,6 +362,7 @@ pub fn auto_factor(i: &AutoInputs) -> AutoPolicy {
     // rate (factor n) needs no headroom, since every tick then shows exactly one frame, due on it. Only a GPU that
     // cannot reach the next even rate keeps an uneven one below half the display's rate: 96 fps on 240 Hz varies far
     // less than it would lose by falling to 48. The drop penalty still steps down from there.
+    let mut even_of = None;
     if i.even_cadence && i.limit_to_display {
         if let Some(n) = display_multiple(i.cadence_hz, i.display_hz) {
             let motion_even = (motion_ceiling..=6).find(|f| n % f == 0).unwrap_or(motion_ceiling);
@@ -372,11 +373,20 @@ pub fn auto_factor(i: &AutoInputs) -> AutoPolicy {
             if let Some(even) = (2..=ceiling).rev().find(|&f| n % f == 0 && fits(f)) {
                 if even >= factor || factor as f64 * i.cadence_hz > i.display_hz * 0.5 {
                     factor = even;
+                    even_of = Some(n);
                 }
             }
         }
     }
-    factor = factor.saturating_sub(i.penalty).max(1);
+    // the drop penalty steps down through the even factors (x4 to x2 at 60 fps on 240 Hz): x3 there was the judder
+    // the even cadence removes, and a run that had drawn a penalty showed it for six seconds (17 % of the pictures
+    // off pace); with no even factor left above x1 it steps down one at a time
+    let evens: Vec<u32> = even_of.map_or(Vec::new(), |n| (2..=factor).rev().filter(|f| n % f == 0).collect());
+    factor = match (evens.get(i.penalty as usize), evens.last()) {
+        (Some(&f), _) => f,
+        (None, Some(&last)) => last.saturating_sub(i.penalty + 1 - evens.len() as u32).max(1),
+        (None, None) => factor.saturating_sub(i.penalty).max(1),
+    };
     let runnable = factor > 1
         && unique_interval_cost(factor, mid, 0.0, i.source_hz, pair, unique) <= unique * 1.1
         && active_interval_cost(factor, mid, 0.0, pair) <= active_interval * 1.1;

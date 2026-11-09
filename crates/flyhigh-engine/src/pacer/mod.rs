@@ -456,7 +456,7 @@ pub struct Pacer {
     auto_changed_at: f64,
     /// Added to every due time so the dues fall halfway between display ticks (see `on_tick_grid`).
     due_shift_ms: f64,
-    due_phase_avg: Option<f64>,
+    due_phase_locked: bool,
     last_tick: Option<f64>,
     last_present_wall: f64,
     last_pts: Option<f64>,
@@ -501,7 +501,7 @@ impl Pacer {
             auto_candidate: None,
             auto_changed_at: f64::NEG_INFINITY,
             due_shift_ms: 0.0,
-            due_phase_avg: None,
+            due_phase_locked: false,
             last_tick: None,
             last_present_wall: f64::NEG_INFINITY,
             last_pts: None,
@@ -550,7 +550,7 @@ impl Pacer {
         self.motion_avg = 0.0;
         self.auto_candidate = None;
         self.auto_changed_at = f64::NEG_INFINITY;
-        self.due_phase_avg = None;
+        self.due_phase_locked = false;
         self.last_pts = None;
         self.prev = None;
         self.prev2 = None;
@@ -703,8 +703,10 @@ impl Pacer {
 
     /// A due time sitting on a display tick is shown on that tick or the next one depending on a fraction of a
     /// millisecond of jitter, so a steady x2 alternated 4 and 12 ms gaps (measured: late flipping between 0.1 and 4.1
-    /// ms on a 240 Hz display). A constant shift keeps the dues halfway between ticks; it moves only when the dues
-    /// drift a quarter tick off the middle, which source and display clocks do slowly. Exact modes have their own grid.
+    /// ms on a 240 Hz display). A shift keeps the dues halfway between ticks. It follows the phase a little on every
+    /// due, because the source and the display drift apart steadily (23.976 fps on 240 Hz: about 1 ms a second) and
+    /// re-centring in jumps a quarter tick off put a hitch every second; it wraps by a whole tick only when the drift
+    /// has used one up, the one slip the two clocks force. Exact modes have their own grid.
     fn on_tick_grid(&mut self, due: f64) -> f64 {
         let display = self.display.measure();
         let (Some(tick), true) =
@@ -714,22 +716,27 @@ impl Pacer {
         };
         let period = 1000.0 / display.display_hz;
         // only an output rate that divides the display's puts its dues at one phase; any other spreads them over the
-        // whole tick, where the average says nothing and a recenter would only add a hitch
+        // whole tick, where following the phase says nothing
         let even = self.source.source_hz().is_some_and(|hz| {
             rate::display_multiple(self.factor.max(1) as f64 * hz, display.display_hz).is_some()
                 || (self.factor.max(1) as f64 * hz - display.display_hz).abs() <= display.display_hz * 0.01
         });
-        if !even {
+        // at the display's own rate every tick takes the next frame whatever its phase, and following the phase only
+        // added slips (60 fps on 240 Hz: 1.7 % of the pictures off pace against 0.9 % without)
+        if !even || self.at_display_rate() {
             return due + self.due_shift_ms;
         }
         let x = (due + self.due_shift_ms - tick).rem_euclid(period);
-        let avg = self.due_phase_avg.map_or(x, |a| a * 0.9 + x * 0.1);
-        if (avg - period / 2.0).abs() > period / 4.0 {
-            let shift = (self.due_shift_ms + period / 2.0 - x).rem_euclid(period);
-            self.due_shift_ms = if shift > period / 2.0 { shift - period } else { shift };
-            self.due_phase_avg = Some(period / 2.0);
+        if self.due_phase_locked {
+            self.due_shift_ms -= 0.05 * (x - period / 2.0);
         } else {
-            self.due_phase_avg = Some(avg);
+            self.due_shift_ms += period / 2.0 - x;
+            self.due_phase_locked = true;
+        }
+        if self.due_shift_ms > period / 2.0 {
+            self.due_shift_ms -= period;
+        } else if self.due_shift_ms < -period / 2.0 {
+            self.due_shift_ms += period;
         }
         due + self.due_shift_ms
     }

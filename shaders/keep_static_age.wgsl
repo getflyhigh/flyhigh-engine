@@ -20,12 +20,28 @@ const DIRS = array<vec2<i32>, 8>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0,
                                  vec2<i32>(1, 1), vec2<i32>(-1, 1), vec2<i32>(1, -1), vec2<i32>(-1, -1));
 const FAR = array<i32, 4>(4, 8, 16, 32);
 const VERIFIED: f32 = 2.0;
+// a pixel flat in both frames is no evidence of standing still (see keep_static_age_tex.wgsl)
+const FLAT: f32 = 0.03;
 fn decide(o: u32, plane: u32, still: bool, moved: bool) -> f16 {
     let raw = select(0.0, min(f32(state[o]) + 1.0, 255.0), still);
     let seen = select(0.0, min(f32(state[plane + o]) + select(0.0, 1.0, moved), 255.0), still);
     state[o] = f16(raw);
     state[plane + o] = f16(seen);
     return f16(select(0.0, raw, seen >= VERIFIED));
+}
+
+fn spread(x: u32, y: u32, plane: u32) -> f32 {
+    let o = y * p.wp + x;
+    var m = 0.0;
+    for (var dy = -1; dy <= 1; dy++) { for (var dx = -1; dx <= 1; dx++) {
+        let xx = u32(clamp(i32(x) + dx, 0, i32(p.w) - 1)); let yy = u32(clamp(i32(y) + dy, 0, i32(p.h) - 1));
+        let q = yy * p.wp + xx;
+        for (var c = 0u; c < 3u; c++) {
+            m = max(m, abs(f32(a[c * plane + q]) - f32(a[c * plane + o])));
+            m = max(m, abs(f32(b[c * plane + q]) - f32(b[c * plane + o])));
+        }
+    } }
+    return m;
 }
 
 fn diff(o: u32, plane: u32) -> f32 {
@@ -50,6 +66,6 @@ fn age(@builtin(global_invocation_id) gid: vec3<u32>) {
         let xx = u32(clamp(q.x, 0, i32(p.w) - 1)); let yy = u32(clamp(q.y, 0, i32(p.h) - 1));
         moved = moved || diff(yy * p.wp + xx, plane) >= p.thr;
     } }
-    let aged = decide(o, plane, diff(o, plane) < p.thr, moved);
+    let aged = decide(o, plane, diff(o, plane) < p.thr && spread(gid.x, gid.y, plane) >= FLAT, moved);
     outp[o] = select(aged, f16(255.0), p.use_mask != 0u && f32(mask[o]) > 0.5);
 }

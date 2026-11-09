@@ -199,6 +199,50 @@ fn keep_static_holds_a_hud_still_over_motion() {
     assert!(mae(&on, &mid) <= mae(&off, &mid) + 0.05, "and the rest of the frame is not worse");
 }
 
+// line art panned `dy` px down: thin dark lines over flat fills, the way anime draws a character
+fn line_art(dy: f32) -> Vec<u8> {
+    let mut v = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H {
+        for x in 0..W {
+            let (fx, fy) = (x as f32, y as f32 - dy);
+            let fill = if fx + 0.3 * fy < 150.0 { [225u8, 205, 170] } else { [170, 140, 100] };
+            let on_line = [(fy - 0.25 * fx - 40.0).abs(), (fy + 0.1 * fx - 120.0).abs(), (fx + 0.3 * fy - 150.0).abs()]
+                .iter()
+                .any(|d| *d < 1.0);
+            let c = if on_line { [60u8, 45, 35] } else { fill };
+            let o = ((y * W + x) * 4) as usize;
+            v[o..o + 3].copy_from_slice(&c);
+            v[o + 3] = 255;
+        }
+    }
+    v
+}
+
+#[test]
+#[ignore]
+fn keep_static_leaves_line_art_on_a_pan_alone() {
+    let Some(e) = engine() else { return };
+    // a fill pixel between where a thin line is in two frames reads unchanged in both: it is not an overlay, and
+    // protecting it erased the in-between's line there (a dotted outline on anime pans)
+    let run = |keep: bool| {
+        let mut o = Options::new(W, H);
+        o.keep_static = keep;
+        let mut g = Generator::new(&e, o).unwrap();
+        let mut last = Vec::new();
+        for i in 0..14 {
+            let out = g.push(&e, &line_art(i as f32 * 6.0), 2).unwrap();
+            if out.len() == 2 {
+                last = out[0].rgba.clone();
+            }
+        }
+        last
+    };
+    let (off, on) = (run(false), run(true));
+    let differ = off.chunks(4).zip(on.chunks(4)).filter(|(a, b)| (0..3).any(|c| a[c].abs_diff(b[c]) > 30)).count();
+    eprintln!("line art pan: protection on vs off, {differ} pixels differ by more than 30");
+    assert!(differ < 20, "protection changed {differ} pixels of moving line art");
+}
+
 #[test]
 #[ignore]
 fn keep_static_after_a_still_camera_has_no_coincidence_ghost() {

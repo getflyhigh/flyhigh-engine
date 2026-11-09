@@ -123,11 +123,11 @@ look like.
   the one that started two frames back. Cadence re-timing needs it; the statistics of the newest pair come back
   asynchronously (`stats_pending`). Three rotating pair contexts.
 - **Classification.** The two frames are sampled on a 48 x 27 grid (`classify.wgsl`); a mean per-channel difference
-  above `scene_cut.threshold` is a cut when the moving pair before it differed by less than half the threshold (a
-  fast camera move is a run of large differences, a cut a lone spike after a calm pair), a mean below
-  `held_frames.mean` with every cell below `held_frames.max` is a hold, anything else motion. The readback is asynchronous (three may be in flight; beyond that the pair counts as
-  motion) and lands before the interval's first mid is due. The mean cell difference in 0..765 units is the motion
-  statistic the Pacer's motion-adaptive ceiling uses.
+  above `scene_cut.threshold` is a cut when the moving pair before it differed by less than half the threshold (a fast
+  camera move is a run of large differences, a cut a lone spike after a calm pair), a mean below `held_frames.mean` with
+  every cell below `held_frames.max` is a hold, anything else motion. The readback is asynchronous (three may be in
+  flight; beyond that the pair counts as motion) and lands before the interval's first mid is due. The mean cell
+  difference in 0..765 units is the motion statistic the Pacer's motion-adaptive ceiling uses.
 - **Order with the Pacer.** Classify the new frame against the previous one, then `pacer.source_frame` with the kind,
   generate the requests it returns, then `push`: the pair must not change before the previous interval's mids are out.
 - **Held frames are reported, never dropped silently**: the Pacer shows the frame and generates nothing for the
@@ -175,16 +175,16 @@ Inside, in the order a tick runs:
    or with a delivery that wanders further it steps by the arrival EMA and follows at 8 %; it resyncs hard beyond
    80 ms and carries on over a frame the decoder skipped.
 3. **Output rate policy** (`rate.rs`). Modes: `Factor(n)`, `Auto` (as many as the display and GPU allow, capped by
-   motion), `DisplayHz`, `Target(fps)`; Auto with `fps_limit` is a strict-ceiling target. Even cadence: when the
-   display runs at a whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to
-   the next factor dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that
-   cannot reach an even rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source
-   exactly; the display's own rate needs no headroom, every tick showing one frame (not with `low_latency`). A
-   factor change the factor in use does not force waits until Auto has asked for it 250 ms and the last change is
-   1 s old. The 2x floor, the display headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the source
-   interval, the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact modes
-   hold their plan until a different one has been proposed 16 frames in a row. When the GPU looks too slow for 2x, one
-   real pair with tiny assumed costs every 2.5 s measures it (`probe`).
+   motion), `DisplayHz`, `Target(fps)`; Auto with `fps_limit` is a strict-ceiling target. Even cadence: when the display
+   runs at a whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to the next
+   factor dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that cannot reach an
+   even rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source exactly; the
+   display's own rate needs no headroom, every tick showing one frame (not with `low_latency`). A factor change the
+   factor in use does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor,
+   the display headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the
+   source interval, the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact
+   modes hold their plan until a different one has been proposed 16 frames in a row. When the GPU looks too slow for 2x,
+   one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
    across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at
    phase t; cuts and holds disable interpolation but keep the grid; the nearest tick to a source frame becomes its
@@ -198,15 +198,17 @@ Inside, in the order a tick runs:
    the arrival jitter (a decaying envelope of how late frames come against the schedule clock) + burst pad, with no
    floor; it rises 2 ms per frame and falls 0.25, so the jitter it follows does not squeeze the timeline.
 5. **Presentation queue** (`queue.rs`). Bounded (24), ordered by due time; outside the exact modes, when the output
-   rate divides the display's, a constant shift keeps the due times halfway between ticks (re-centred when they
-   drift a quarter tick off); one presentation per tick; the oldest entry
+   rate divides the display's and is below it, a shift keeps the due times halfway between ticks, following the
+   phase a little on every due (source and display clocks drift apart, 23.976 fps on 240 Hz by about 1 ms a second)
+   and wrapping by a whole tick when the drift has used one up; one presentation per tick; the oldest entry
    inside the lateness contract (3 output intervals) is presented when the display can service the target, else the
    newest due. Entries before it are dropped and counted; entries due before the last presented one are stale. A
    requested mid that is not there in time shows its anchor instead (`fallback`).
 6. **Auto controller** (`control.rs`, AIMD). Drop pressure is a leaky integrator (tau 300 ms); several frames due in
    one tick count as one event; drops within 20 ms after a host stall are not charged while stalls are rarer than 4
    per 2 s, and a missed vsync (a tick gap over 1.5 floors) or a single drop at the display's own rate counts as
-   such a stall; pressure > 1.2 lowers the factor by one (by two above 3), not more often than every 500 ms; after 6 s with
+   such a stall; pressure > 1.2 lowers the factor by one (by two above 3), not more often than every 500 ms, along
+   the even factors when the even cadence holds (x4, x2, x1 at 60 fps on 240 Hz); after 6 s with
    pressure < 0.15 the factor recovers one step. Tick strain (ticks 1.7 x slower than the floor) adds a provisional
    one-step penalty that lifts 500 ms after the strain ends. A settle window (1200 ms, the extension's measured
    fullscreen reflow) after a mode change exempts drops. The motion-adaptive ceiling (> 45 motion units: 2, > 28: 3,
@@ -395,17 +397,20 @@ the texture is not flat. Level 2 drops the jump requirement (better on drawn con
 
 ## Static protection and the mask
 
-Pixels unchanged for `frames` source pairs (a HUD, chat, burnt-in subtitles) are taken from the source frames instead
-of being warped with the motion behind them: an age pass in the pair stage counts unchanged pairs per pixel, the
-render avoids warp sources on protected pixels, and an apply pass after the render mixes them toward the sources'
-value with a two-pair ramp. Unchanged is not enough on its own: after the camera stood still every pixel carries a
-high age, and in the first moving pair pixels of the moving picture that match by coincidence would be held as
-overlays, rendered as the unwarped average of the two frames (a half-step ghost of the whole scene, worst with a loose
-tolerance). The age pass therefore also counts the pairs in which a pixel stayed unchanged while something within
-32 px of it changed, and protects only from the second such pair: an overlay over a moving scene does that every
-pair, a coincidence does not repeat. A flat wall whose surroundings never change is never held; the network renders
-it as it is. The host's protection mask (`protection_mask`, `write_mask`) enters the same age pass as
-age 255, so it works with or without the automatic detection (`shaders/keep_static*.wgsl`).
+Pixels unchanged for `frames` source pairs (a HUD, chat, burnt-in subtitles) are taken from the source frames instead of
+being warped with the motion behind them: an age pass in the pair stage counts unchanged pairs per pixel, the render
+avoids warp sources on protected pixels, and an apply pass after the render mixes them toward the sources' value with a
+two-pair ramp. Unchanged is not enough on its own: after the camera stood still every pixel carries a high age, and in
+the first moving pair pixels of the moving picture that match by coincidence would be held as overlays, rendered as the
+unwarped average of the two frames (a half-step ghost of the whole scene, worst with a loose tolerance). The age pass
+therefore also counts the pairs in which a pixel stayed unchanged while something within 32 px of it changed, and
+protects only from the second such pair: an overlay over a moving scene does that every pair, a coincidence does not
+repeat. A pixel whose 3 x 3 neighbourhood is one flat colour in both frames counts as changed: it carries no evidence of
+standing still, and in a panned flat fill (anime) the fill between where a thin line is in the two frames reads
+unchanged in both, so holding it erased the in-between's line there. An overlay has an edge of its own (a crosshair,
+text, a panel's border). A flat wall whose surroundings never change is never held; the network renders it as it is. The
+host's protection mask (`protection_mask`, `write_mask`) enters the same age pass as age 255, so it works with or
+without the automatic detection (`shaders/keep_static*.wgsl`).
 
 ## Camera warp
 
