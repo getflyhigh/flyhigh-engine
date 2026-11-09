@@ -186,17 +186,17 @@ Inside, in the order a tick runs:
    modes hold their plan until a different one has been proposed 16 frames in a row. When the GPU looks too slow for 2x,
    one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
-   across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at
-   phase t; cuts and holds disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of
-   a step) shows that frame, every other tick interpolates at its own phase. Factor modes: mids at k / n of the
-   interval and the source frame at its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid
-   cost + 25 ms + burst pad, floor 60 ms or 42 ms when a frame is cheap and the steady factor is 3 or less, max
-   180 ms) sets how far ahead frames are due; it drifts 0.25 ms per frame and rises 2 ms per frame only while frames
-   run late (exact modes: a whole interval). Factor-mode mids are spread over the clock's own step.
-   With `low_latency` (games) the target is what the first in-between needs and no more: it is due 1/N of an
-   interval after its source frame and needs the next one, so (1 - 1/N) x interval + pair + frame + present cost +
-   the arrival jitter (a decaying envelope of how late frames come against the schedule clock) + burst pad, with no
-   floor; it rises 2 ms per frame and falls 0.25, so the jitter it follows does not squeeze the timeline.
+   across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at phase
+   t; cuts and holds disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of a step)
+   shows that frame, every other tick interpolates at its own phase. Factor modes: mids at k / n of the interval and the
+   source frame at its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid
+   cost + 25 ms + burst pad, floor 60 ms or 42 ms when a frame is cheap and the steady factor is 3 or less, max 180 ms)
+   sets how far ahead frames are due; it drifts 0.25 ms per frame and rises 2 ms per frame only while frames run late
+   (exact modes: a whole interval). Factor-mode mids are spread over the clock's own step. With `low_latency` (games)
+   the target is what the first in-between needs and no more: it is due 1/N of an interval after its source frame and
+   needs the next one, so (1 - 1/N) x interval + pair + frame + present cost + the arrival jitter (a decaying envelope
+   of how late frames come against the schedule clock) + burst pad, with no floor; it rises 2 ms per frame and falls
+   0.25, so the jitter it follows does not squeeze the timeline.
 5. **Presentation queue** (`queue.rs`). Bounded (24), ordered by due time; outside the exact modes, when the output
    rate divides the display's and is below it, a shift keeps the due times halfway between ticks, following the
    phase a little on every due (source and display clocks drift apart, 23.976 fps on 240 Hz by about 1 ms a second)
