@@ -125,9 +125,11 @@ look like.
 - **Classification.** The two frames are sampled on a 48 x 27 grid (`classify.wgsl`); a mean per-channel difference
   above `scene_cut.threshold` is a cut when the moving pair before it differed by less than half the threshold (a fast
   camera move is a run of large differences, a cut a lone spike after a calm pair), a mean below `held_frames.mean` with
-  every cell below `held_frames.max` is a hold, anything else motion. The readback is asynchronous (three may be in
-  flight; beyond that the pair counts as motion) and lands before the interval's first mid is due. The mean cell
-  difference in 0..765 units is the motion statistic the Pacer's motion-adaptive ceiling uses.
+  every cell below `held_frames.max` is a hold, anything else motion. With held frames on and no cadence re-timing, a
+  moving pair right after a held one is reported as a cut: a change after a held frame is animation on twos or threes,
+  shown as drawn. The readback is asynchronous (three may be in flight; beyond that the pair counts as motion) and lands
+  before the interval's first mid is due. The mean cell difference in 0..765 units is the motion statistic the Pacer's
+  motion-adaptive ceiling uses.
 - **Order with the Pacer.** Classify the new frame against the previous one, then `pacer.source_frame` with the kind,
   generate the requests it returns, then `push`: the pair must not change before the previous interval's mids are out.
 - **Held frames are reported, never dropped silently**: the Pacer shows the frame and generates nothing for the

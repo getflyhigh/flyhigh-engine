@@ -414,6 +414,23 @@ fn auto_takes_the_exact_grid_where_no_factor_is_even() {
     assert!(s.len() as f64 > 8.9 * 74.0 && off_pace(&s, 1000.0 / 75.0) < 0.01, "60 fps on 75 Hz: {}", s.len());
     let s = shown(&auto, 1000.0 / 60.0, &regular(50.0, 12.0), 1.0);
     assert!(s.len() as f64 > 8.9 * 59.0 && off_pace(&s, 1000.0 / 60.0) < 0.01, "50 fps on 60 Hz: {}", s.len());
+    // the common gaming displays: 23.976 fps on 180, 144 and 165 Hz, 60 fps on 144 and 165 Hz
+    for (fps, hz) in
+        [(24000.0 / 1001.0, 180.0), (24000.0 / 1001.0, 144.0), (24000.0 / 1001.0, 165.0), (60.0, 144.0), (60.0, 165.0)]
+    {
+        let s = shown(&auto, 1000.0 / hz, &regular(fps, 12.0), 1.0);
+        let off = off_pace(&s, 1000.0 / hz);
+        eprintln!(
+            "{fps:.3} fps on {hz} Hz: {:.1} pictures a second, {:.2} % off pace",
+            s.len() as f64 / 9.0,
+            off * 100.0
+        );
+        assert!(
+            s.len() as f64 > 9.0 * 2.0 * fps * 0.97 && off < 0.02,
+            "{fps} fps on {hz} Hz: {off:.3} off pace, {}",
+            s.len()
+        );
+    }
     // a display at the source's own rate has nothing to add
     let s = shown(&auto, 1000.0 / 60.0, &regular(60.0, 12.0), 1.0);
     assert!(s.iter().all(|x| x.2 == 1));

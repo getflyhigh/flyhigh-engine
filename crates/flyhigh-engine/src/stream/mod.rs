@@ -91,8 +91,9 @@ pub struct StreamOptions {
     #[option(values = "off, or a threshold 0 to 1", c = "scene_cut (threshold, 0 = off)")]
     pub scene_cut: Option<SceneCut>,
     /// A pair whose mean difference is below `mean` and whose most different cell is below `max` is a held frame: shown
-    /// as is and counted for the unique-frame rate, instead of a still in-between. On for anime; the defaults 0.0033 and
-    /// 0.06 stay above codec noise on a re-encoded hold.
+    /// as is and counted for the unique-frame rate, instead of a still in-between. The first change after a held frame is
+    /// then shown as drawn too (animation on twos and threes is not motion), unless cadence re-timing spreads it. On for
+    /// anime; the defaults 0.0033 and 0.06 stay above codec noise on a re-encoded hold.
     #[option(values = "off, or mean and max thresholds 0 to 1", c = "held_frames (0, 1), held_mean, held_max")]
     pub held_frames: Option<HeldFrames>,
     /// Input slots created up front (more with `add_input`); the Pacer's history says how many a host needs.
@@ -233,6 +234,8 @@ impl Stream {
                     cut_mean: opts.scene_cut.map(|c| c.threshold),
                     hold_mean: opts.held_frames.map(|h| h.mean),
                     hold_max: opts.held_frames.map_or(0.0, |h| h.max),
+                    // cadence re-timing spreads such a change over the frames it was held for, and needs it as motion
+                    step_after_hold: opts.held_frames.is_some() && !opts.cadence,
                 },
             )
         });

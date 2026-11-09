@@ -39,6 +39,8 @@ pub struct Thresholds {
     /// A pair whose mean difference is below this and whose largest cell is below `hold_max` is a held frame.
     pub hold_mean: Option<f32>,
     pub hold_max: f32,
+    /// The first change after a held frame is not interpolated (see `Classification::after_hold`).
+    pub step_after_hold: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,6 +71,19 @@ impl Classification {
         Classification { kind, mean, max, black: max == 0.0, motion: mean as f64 * CELL_MAX as f64 }
     }
 
+    /// The same pair once it is known whether the pair before it was a held frame. A change that follows a held frame
+    /// is animation drawn on twos or threes (a mouth, a blink, a character against a still background), not motion:
+    /// its in-betweens morphed one drawing into the next within one frame time and then stood still for two, four
+    /// generated frames in 41 ms and none for 83, which read as a smeared mouth and as a rate jumping between 24 and
+    /// 120. Such a pair is shown as it is drawn (a cut for the scheduler: no in-betweens, a new frame). Motion that
+    /// goes on from frame to frame is interpolated as ever, from its second pair.
+    pub fn after_hold(mut self, held_before: bool, th: &Thresholds) -> Classification {
+        if th.step_after_hold && held_before && self.kind == IntervalKind::Motion {
+            self.kind = IntervalKind::Cut;
+        }
+        self
+    }
+
     /// The same pair once the mean difference of the moving pair before it is known (`before`; None at the start):
     /// a cut after a moving pair is the middle of a fast camera move (see `CUT_AFTER_CALM`).
     pub fn after(mut self, before: Option<f32>, th: &Thresholds) -> Classification {
@@ -90,6 +105,7 @@ pub struct Classifier {
     thresholds: Thresholds,
     /// The mean difference of the last pair that was not a hold, as its readback landed.
     last_moving: Rc<Cell<Option<f32>>>,
+    last_held: Rc<Cell<bool>>,
 }
 
 impl Classifier {
@@ -131,6 +147,7 @@ impl Classifier {
             bind_groups: HashMap::new(),
             thresholds,
             last_moving: Rc::new(Cell::new(None)),
+            last_held: Rc::new(Cell::new(false)),
         }
     }
 
@@ -177,14 +194,18 @@ impl Classifier {
         let th = self.thresholds;
         let cells = GRID.0 * GRID.1;
         let last_moving = self.last_moving.clone();
+        let last_held = self.last_held.clone();
         Some(Readback::new(
             stage,
             Box::new(move |d: &[u8]| {
                 let s: &[u32] = bytemuck::cast_slice(&d[..8]);
                 let c = Classification::from_stats(s[0], s[1], cells, &th).after(last_moving.get(), &th);
-                if c.kind != IntervalKind::Hold {
+                let held = c.kind == IntervalKind::Hold;
+                if !held {
                     last_moving.set(Some(c.mean));
                 }
+                let c = c.after_hold(last_held.get(), &th);
+                last_held.set(held);
                 c
             }),
             Some(Box::new(move || busy.set(false))),
@@ -198,6 +219,7 @@ impl Classifier {
 
     /// A seek or a new source: the pair before the next one is no longer the one this saw.
     pub fn forget_history(&self) {
+        self.last_held.set(false);
         self.last_moving.set(None);
     }
 }

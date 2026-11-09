@@ -12,7 +12,7 @@ const H: u32 = 192;
 
 #[test]
 fn classification_thresholds_are_pure() {
-    let th = Thresholds { cut_mean: Some(0.08), hold_mean: Some(0.0033), hold_max: 0.06 };
+    let th = Thresholds { cut_mean: Some(0.08), hold_mean: Some(0.0033), hold_max: 0.06, step_after_hold: true };
     let cells = GRID.0 * GRID.1;
     let identical = Classification::from_stats(0, 0, cells, &th);
     assert_eq!((identical.kind, identical.black), (IntervalKind::Hold, true));
@@ -23,13 +23,18 @@ fn classification_thresholds_are_pure() {
     assert!((motion.motion - 20.0).abs() < 0.01, "the Pacer's motion units are the mean cell difference");
     let noise = Classification::from_stats(cells, 30, cells, &th);
     assert_eq!(noise.kind, IntervalKind::Hold, "codec noise on a held frame stays a hold");
-    let off = Thresholds { cut_mean: None, hold_mean: None, hold_max: 0.0 };
+    let off = Thresholds { cut_mean: None, hold_mean: None, hold_max: 0.0, step_after_hold: false };
     assert_eq!(Classification::from_stats(cells * 765, 765, cells, &off).kind, IntervalKind::Motion);
     // a cut is a lone spike after a calm pair; after a moving pair it is the middle of a fast camera move
     assert_eq!(cut.after(Some(0.02), &th).kind, IntervalKind::Cut);
     assert_eq!(cut.after(None, &th).kind, IntervalKind::Cut);
     assert_eq!(cut.after(Some(0.07), &th).kind, IntervalKind::Motion);
     assert_eq!(motion.after(Some(0.2), &th).kind, IntervalKind::Motion);
+    // a change after a held frame is animation on twos or threes: shown as drawn, not interpolated
+    assert_eq!(motion.after_hold(true, &th).kind, IntervalKind::Cut);
+    assert_eq!(motion.after_hold(false, &th).kind, IntervalKind::Motion);
+    assert_eq!(noise.after_hold(true, &th).kind, IntervalKind::Hold);
+    assert_eq!(motion.after_hold(true, &off).kind, IntervalKind::Motion);
 }
 
 fn engine() -> Option<Engine> {

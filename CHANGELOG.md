@@ -5,6 +5,15 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- With held frames detected (`held_frames`) and no cadence re-timing, the first change after a held frame is not
+  interpolated. It is animation drawn on twos or threes (a mouth, a blink, a character against a still background),
+  not motion: its in-betweens morphed one drawing into the next within one frame time and then stood still for two,
+  four generated frames in 41 ms and none for 83, a smeared mouth and a rate jumping between 24 and 120. Such a pair
+  is shown as drawn (the classifier reports a cut: no in-betweens, a new frame); motion that goes on from frame to
+  frame is interpolated from its second pair. Cadence re-timing (video mode) still takes these changes as motion.
+
 ## [0.3.6] - 2026-11-10
 
 ### Changed
