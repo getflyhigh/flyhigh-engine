@@ -439,6 +439,19 @@ fn firefox_stalls_are_not_charged_to_auto() {
 }
 
 #[test]
+fn stalls_that_a_lower_factor_does_not_cure_stop_costing_frames() {
+    // a display loop that stalls 70 ms five times every two seconds whatever is generated (Firefox with a page
+    // element over the canvas): the drops after the stalls first draw a penalty, the stalls go on at the lower factor,
+    // and the penalty is lifted instead of sitting at x1
+    let trace = synth(24_000.0, 24.0, 2.0, 3.0, |t| if t.rem_euclid(400.0) < 8.4 { 70.0 } else { 1000.0 / 120.0 });
+    let r = run(&trace, &PacerOptions::default());
+    let late = &r.seconds[8..23];
+    let full = late.iter().filter(|s| s.factor >= 4).count();
+    assert!(full >= 12, "back at the full factor for most of the time: {late:?}");
+    assert!(late.iter().map(|s| s.presents).sum::<u64>() / late.len() as u64 >= 70, "{late:?}");
+}
+
+#[test]
 fn a_saturated_loop_steps_auto_down_and_a_clean_stretch_recovers_it() {
     // ticks slow to 30 ms (3.6 x the floor) for three seconds: frames pile up, several due per tick
     let trace = synth(28_000.0, 24.0, 2.0, 3.0, |t| if (3000.0..6000.0).contains(&t) { 30.0 } else { 1000.0 / 120.0 });

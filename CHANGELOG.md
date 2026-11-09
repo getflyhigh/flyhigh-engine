@@ -42,6 +42,12 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
   re-timing of a real frame, a stride over 2 or 5 requests only ever met those, which have no cost: the frame cost
   was never measured and Auto stayed on the seed. A sample that did not land (nothing written, or refused in a settle
   window) is taken again on the next call.
+- Stalls that a lower factor does not cure no longer cost frames. Firefox stalls its display loop 50 to 100 ms a few
+  times a second while a page element lies over the canvas, whatever is generated; the drops after the stalls drew
+  penalties down to x1 (21 pictures a second, under the video's own rate, where x5 showed 44 to 90 between the same
+  stalls). Two seconds after a step down with the stall load no lower, the penalty is lifted and the drops that
+  follow a stall count as the host's for half a minute (Firefox with the pointer over the video: 26 to 61-77
+  pictures a second). Drops without a stall are charged as before.
 - `settle_active` in the report was false before the first tick, so a host measuring its GPU costs once measured
   inside the settle window, had the samples refused and stayed on the 10 ms seed (the reference player: x4 instead
   of x5 in about one run in four). The report is right from the first event, and the player measures until taken.

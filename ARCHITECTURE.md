@@ -217,15 +217,17 @@ Inside, in the order a tick runs:
    number n of ticks (2 to 8) after the one before it is not presented sooner than n ticks after that one was, so
    due-time jitter crossing a tick boundary no longer leaves one picture up three ticks and the next one; past a tick
    plus 4 to 8 ms late it goes out at once, the slip two drifting clocks force.
-6. **Auto controller** (`control.rs`, AIMD). Drop pressure is a leaky integrator (tau 300 ms); several frames due in
-   one tick count as one event; drops within 20 ms after a host stall are not charged while stalls are rarer than 4
-   per 2 s, and a missed vsync (a tick gap over 1.5 floors) or a single drop at the display's own rate counts as
-   such a stall; pressure > 1.2 lowers the factor by one (by two above 3), not more often than every 500 ms, along
-   the even factors when the even cadence holds (x4, x2, x1 at 60 fps on 240 Hz); after 6 s with
-   pressure < 0.15 the factor recovers one step. Tick strain (ticks 1.7 x slower than the floor) adds a provisional
-   one-step penalty that lifts 500 ms after the strain ends. A settle window (1200 ms, the extension's measured
-   fullscreen reflow) after a mode change exempts drops. The motion-adaptive ceiling (> 45 motion units: 2, > 28: 3,
-   > 16: 4, else 6) is an option. Auto that cannot run by the budget probes one 2x pair at 2.5 / 5 / 10 / 20 s.
+6. **Auto controller** (`control.rs`, AIMD). Drop pressure is a leaky integrator (tau 300 ms); several frames due in one
+   tick count as one event; drops within 20 ms after a host stall are not charged while stalls are rarer than 4 per 2 s,
+   and a missed vsync (a tick gap over 1.5 floors) or a single drop at the display's own rate counts as such a stall;
+   pressure > 1.2 lowers the factor by one (by two above 3), not more often than every 500 ms, along the even factors
+   when the even cadence holds (x4, x2, x1 at 60 fps on 240 Hz); after 6 s with pressure < 0.15 the factor recovers one
+   step. A penalty that does not help is lifted: two seconds after a step down with the stall load no lower than 0.7 of
+   what it was (and at least half the stall limit), the stalls are the host's own, the penalty goes and the drops that
+   follow a stall are exempt for 30 s. Tick strain (ticks 1.7 x slower than the floor) adds a provisional one-step
+   penalty that lifts 500 ms after the strain ends. A settle window (1200 ms, the extension's measured fullscreen
+   reflow) after a mode change exempts drops. The motion-adaptive ceiling (> 45 motion units: 2, > 28: 3, > 16: 4, else
+   6) is an option. Auto that cannot run by the budget probes one 2x pair at 2.5 / 5 / 10 / 20 s.
 7. **Just-in-time requests.** A mid is requested `pair + 2 x (mid + present) + 8` ms before its slot, so present
    blits interleave with computes instead of the first mid waiting for the whole batch.
 8. **Host present limit.** No two presents closer than `min_present_interval_ms` (Firefox: 7 ms); the display

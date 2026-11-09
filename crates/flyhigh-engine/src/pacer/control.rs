@@ -18,6 +18,9 @@ pub struct ControlOptions {
     pub probe_attempts: u32,
 }
 
+const HOST_BOUND_CHECK_MS: f64 = 2000.0;
+const HOST_BOUND_MS: f64 = 30_000.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DropCharge {
     Charged,
@@ -41,6 +44,9 @@ pub struct AutoController {
     settle_until: f64,
     probe_attempts: u32,
     probe_next_at: f64,
+    /// The stall load when the penalty last rose, and until when stalls count as the host's own (see `step`).
+    stall_load_at_penalty: f64,
+    host_bound_until: f64,
 }
 
 impl AutoController {
@@ -58,6 +64,8 @@ impl AutoController {
             settle_until: f64::NEG_INFINITY,
             probe_attempts: 0,
             probe_next_at: now + o.probe_initial_ms,
+            stall_load_at_penalty: 0.0,
+            host_bound_until: f64::NEG_INFINITY,
         }
     }
 
@@ -98,7 +106,8 @@ impl AutoController {
         if !self.settled(now) {
             return DropCharge::SettleExempt;
         }
-        if now - self.stall_t < o.stall_window_ms && self.stall_load < o.stall_rate_limit {
+        let after_stall = now - self.stall_t < o.stall_window_ms;
+        if after_stall && (self.stall_load < o.stall_rate_limit || now < self.host_bound_until) {
             return DropCharge::StallExempt;
         }
         self.pressure += (due as f64).min(1.0);
@@ -127,11 +136,26 @@ impl AutoController {
             self.strain_penalty = 0;
             self.strain_pressure = 0.0;
         }
+        // Stalls that go on as before at the lower factor are not the in-betweens' doing (Firefox stalls its display
+        // loop 50 to 100 ms a few times a second while any page element lies over the canvas, whatever is generated):
+        // the penalty only took frames away, 21 pictures a second at x1 where x5 showed 44 to 90 between the same
+        // stalls. Two seconds after a step down with the stall load no lower, the penalty is lifted and the drops that
+        // follow a stall are the host's for half a minute; drops without a stall are charged as ever.
+        if self.penalty > 0
+            && now - self.penalty_t > HOST_BOUND_CHECK_MS
+            && self.stall_load >= (0.7 * self.stall_load_at_penalty).max(0.5 * o.stall_rate_limit)
+        {
+            self.penalty = 0;
+            self.pressure = 0.0;
+            self.penalty_t = now;
+            self.host_bound_until = now + HOST_BOUND_MS;
+        }
         if self.pressure > o.penalty_up && self.penalty < o.penalty_max && now - self.penalty_t > o.penalty_min_gap_ms {
             let step = if self.pressure > o.penalty_burst { 2 } else { 1 };
             self.penalty = (self.penalty + step).min(o.penalty_max);
             self.penalty_t = now;
             self.pressure = 0.0;
+            self.stall_load_at_penalty = self.stall_load;
         } else if self.penalty > 0 && self.pressure < o.recovery_below && now - self.penalty_t > o.recovery_after_ms {
             self.penalty -= 1;
             self.penalty_t = now;
