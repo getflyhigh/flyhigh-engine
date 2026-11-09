@@ -26,28 +26,19 @@ pub struct GridPlan {
     pub overflowed: bool,
 }
 
-/// Interpolations everywhere except the tick nearest a source frame, which stays that source frame.
-pub fn assign_kinds(slots: &mut [Slot], interpolate: bool) {
+/// Interpolations everywhere except a tick that lands on a source frame (within 5 % of a step), which shows that frame.
+/// Snapping the nearest tick to its source frame wherever it stood put the picture up to half a step off its time:
+/// 23.976 fps at 60 showed phases 0, .41, .81, 1.0, 1.61 instead of 0, .4, .8, 1.2, 1.6, a shake on slow pans.
+pub fn assign_kinds(slots: &mut [Slot], interpolate: bool, source_interval_ms: f64, step_ms: f64) {
+    let on_frame = |t: f64| t.min(1.0 - t).abs() * source_interval_ms <= 0.05 * step_ms;
     for s in slots.iter_mut() {
-        s.kind = if interpolate {
+        s.kind = if interpolate && !on_frame(s.t) {
             Kind::Interpolate
         } else if s.t < 0.5 {
             Kind::Previous
         } else {
             Kind::Current
         };
-    }
-    if interpolate && !slots.is_empty() {
-        let mut anchor = 0;
-        let mut distance = slots[0].t.abs().min((1.0 - slots[0].t).abs());
-        for (i, s) in slots.iter().enumerate().skip(1) {
-            let d = s.t.abs().min((1.0 - s.t).abs());
-            if d < distance {
-                anchor = i;
-                distance = d;
-            }
-        }
-        slots[anchor].kind = if slots[anchor].t <= 0.5 { Kind::Previous } else { Kind::Current };
     }
 }
 
@@ -114,7 +105,7 @@ pub fn plan_source_cadence(
             overflowed,
         };
     }
-    assign_kinds(&mut slots, interpolate);
+    assign_kinds(&mut slots, interpolate, source_interval_ms, step);
     GridPlan {
         next_at: at,
         next_phase_ms: (phase - source_interval_ms).max(0.0),

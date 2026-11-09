@@ -85,27 +85,32 @@ fn source_cadence_trims_jitter_and_snaps() {
 }
 
 #[test]
-fn exact_grid_gives_every_interval_one_anchor() {
-    // 24 fps into 60 Hz: 2 or 3 ticks per interval, exactly one of them a source frame
-    let mut next_at = 0.0;
-    let mut phase = 0.0;
-    let mut start = 1000.0;
-    let mut counts = Vec::new();
-    for _ in 0..12 {
-        let g = plan_source_cadence(next_at, phase, start, 1000.0 / 24.0, 60.0, true);
-        assert!(!g.overflowed);
-        let anchors = g.slots.iter().filter(|s| s.kind != Kind::Interpolate).count();
-        assert_eq!(anchors, 1, "{:?}", g.slots);
-        counts.push(g.slots.len());
-        for w in g.slots.windows(2) {
-            assert!((w[1].at - w[0].at - g.step_ms).abs() < 1e-6, "deadlines are one step apart");
+fn exact_grid_shows_a_source_frame_only_where_a_tick_lands_on_it() {
+    // 24 fps (and 23.976) into 60 Hz: 2 or 3 ticks per interval, each at its own phase; a tick shows the source frame
+    // only where it lands on it, never the nearest tick snapped onto it (that put the picture up to half a step off)
+    for source_hz in [24.0, 24000.0 / 1001.0] {
+        let interval = 1000.0 / source_hz;
+        let mut next_at = 0.0;
+        let mut phase = 0.0;
+        let mut start = 1000.0;
+        let mut counts = Vec::new();
+        for _ in 0..12 {
+            let g = plan_source_cadence(next_at, phase, start, interval, 60.0, true);
+            assert!(!g.overflowed);
+            for s in &g.slots {
+                let on_frame = s.t.min(1.0 - s.t) * interval <= 0.05 * g.step_ms;
+                assert_eq!(s.kind != Kind::Interpolate, on_frame, "{:?}", g.slots);
+            }
+            counts.push(g.slots.len());
+            for w in g.slots.windows(2) {
+                assert!((w[1].at - w[0].at - g.step_ms).abs() < 1e-6, "deadlines are one step apart");
+            }
+            next_at = g.next_at;
+            phase = g.next_phase_ms;
+            start += interval;
         }
-        next_at = g.next_at;
-        phase = g.next_phase_ms;
-        start += 1000.0 / 24.0;
+        assert!(counts.iter().all(|c| *c == 2 || *c == 3), "{counts:?}");
     }
-    // the first interval starts the grid one step in: 29 ticks over these 12 intervals, 30 from then on
-    assert!(counts.iter().all(|c| *c == 2 || *c == 3) && counts.iter().sum::<usize>() == 29, "{counts:?}");
     let cut = plan_source_cadence(0.0, 0.0, 0.0, 1000.0 / 24.0, 60.0, false);
     assert!(cut.slots.iter().all(|s| s.kind != Kind::Interpolate), "a cut keeps the grid on source frames");
 }

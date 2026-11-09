@@ -187,9 +187,9 @@ Inside, in the order a tick runs:
    one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
    across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at
-   phase t; cuts and holds disable interpolation but keep the grid; the nearest tick to a source frame becomes its
-   anchor when the output rate is a multiple of the source rate. Factor modes: mids at k / n of the interval and the
-   source frame at its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid
+   phase t; cuts and holds disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of
+   a step) shows that frame, every other tick interpolates at its own phase. Factor modes: mids at k / n of the
+   interval and the source frame at its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid
    cost + 25 ms + burst pad, floor 60 ms or 42 ms when a frame is cheap and the steady factor is 3 or less, max
    180 ms) sets how far ahead frames are due; it drifts 0.25 ms per frame and rises 2 ms per frame only while frames
    run late (exact modes: a whole interval). Factor-mode mids are spread over the clock's own step.
