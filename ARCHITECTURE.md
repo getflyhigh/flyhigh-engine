@@ -182,21 +182,23 @@ Inside, in the order a tick runs:
    motion), `DisplayHz`, `Target(fps)`; Auto with `fps_limit` is a strict-ceiling target. Auto runs on factors where the
    display is a whole multiple of a regular source, and on the exact grid where it is not (24 fps on 60 Hz, 60 fps on
    144 Hz, 25 or 50 fps on anything, a source that skips frames): the display's rate or the whole fraction of it the
-   GPU, the motion (up to 2.5, 3.75 and 5 frames per source frame as motion rises) and the drop penalty leave, never
-   under twice the source; four source frames in a row must agree before it moves between the two, and a host with a
-   present limit below the refresh rate keeps the factors. An exact rate that is the display's or a whole fraction of it
-   is taken from the measured tick period and has no headroom (97 % of the rate left a tick without a new frame every 33
-   ticks); the headroom remains for a strict cap and a host present limit. Even cadence: when the display runs at a
-   whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to the next factor
-   dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that cannot reach an even
-   rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source exactly; the display's
-   own rate needs no headroom, every tick showing one frame (not with `low_latency`). A factor change the factor in use
-   does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor, the display
-   headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the source interval,
-   the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact modes hold their
-   plan until a different one has been proposed 16 frames in a row (the first plan after measuring starts at once).
-   Until the costs are measured Auto sizes by the host's seeds (`mid_cost_seed_ms`, `pair_cost_seed_ms`). When the GPU
-   looks too slow for 2x, one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
+   GPU, the motion (up to 2.5, 3.75 and 5 frames per source frame as motion rises) and the drop penalty leave, down to
+   1.15 times the source (the grid needs no doubling: 60 fps on 75 Hz becomes 75 even pictures; a factor and the other
+   exact modes keep the 2x floor); four source frames in a row must agree before it moves between the two, and a host
+   with a present limit below the refresh rate keeps the factors. An exact rate that is the display's or a whole
+   fraction of it is taken from the measured tick period and has no headroom (97 % of the rate left a tick without a new
+   frame every 33 ticks); the headroom remains for a strict cap and a host present limit. Even cadence: when the display
+   runs at a whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to the next
+   factor dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that cannot reach an
+   even rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source exactly; the
+   display's own rate needs no headroom, every tick showing one frame (not with `low_latency`). A factor change the
+   factor in use does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor,
+   the display headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the
+   source interval, the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact
+   modes hold their plan until a different one has been proposed 16 frames in a row (the first plan after measuring
+   starts at once). Until the costs are measured Auto sizes by the host's seeds (`mid_cost_seed_ms`,
+   `pair_cost_seed_ms`). When the GPU looks too slow for 2x, one real pair with tiny assumed costs every 2.5 s measures
+   it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
    across intervals, each pair as long as its timestamps say (a browser at 1.5x delivers steps of one and two frames);
    each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at phase t; cuts and holds

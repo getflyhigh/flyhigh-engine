@@ -89,6 +89,8 @@ pub struct RateInputs {
     pub headroom: f64,
     pub compute_budget: f64,
     pub max_mids: usize,
+    /// The least output rate as a multiple of the source rate: 2 (a frame between every two), except on Auto's grid.
+    pub min_ratio: f64,
 }
 
 pub fn target_fps(v: f64) -> Option<f64> {
@@ -119,7 +121,7 @@ pub fn resolve_output_rate(i: &RateInputs) -> OutputPlan {
         RateMode::DisplayHz => Some(d.capacity_hz),
         RateMode::Target(fps) => target_fps(fps),
     };
-    let minimum = i.source_hz.map(|s| s * 2.0);
+    let minimum = i.source_hz.map(|s| s * i.min_ratio);
     plan.requested_hz = requested;
     plan.minimum_hz = minimum;
     let Some(requested) = requested else {

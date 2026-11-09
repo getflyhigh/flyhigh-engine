@@ -408,8 +408,14 @@ fn auto_takes_the_exact_grid_where_no_factor_is_even() {
     let s = shown(&auto, 1000.0 / 240.0, &regular(60.0, 12.0), 1.0);
     assert!(s.iter().all(|x| x.2 == 4), "60 fps on 240 Hz is x4");
     assert!(off_pace(&s, 1000.0 / 240.0) < 0.01);
-    // under twice the source there is nothing to generate: 60 fps on 75 Hz stays as it is
+    // the grid needs no doubling: 60 fps on 75 Hz, every fourth frame shown twice as it is, becomes 75 even pictures,
+    // and 50 fps on 60 Hz 60
     let s = shown(&auto, 1000.0 / 75.0, &regular(60.0, 12.0), 1.0);
+    assert!(s.len() as f64 > 8.9 * 74.0 && off_pace(&s, 1000.0 / 75.0) < 0.01, "60 fps on 75 Hz: {}", s.len());
+    let s = shown(&auto, 1000.0 / 60.0, &regular(50.0, 12.0), 1.0);
+    assert!(s.len() as f64 > 8.9 * 59.0 && off_pace(&s, 1000.0 / 60.0) < 0.01, "50 fps on 60 Hz: {}", s.len());
+    // a display at the source's own rate has nothing to add
+    let s = shown(&auto, 1000.0 / 60.0, &regular(60.0, 12.0), 1.0);
     assert!(s.iter().all(|x| x.2 == 1));
 }
 

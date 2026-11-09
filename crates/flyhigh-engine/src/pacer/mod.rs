@@ -338,6 +338,9 @@ const EXACT_DELAY_MAX_MS: f64 = 2500.0;
 const AUTO_ASK_MS: f64 = 250.0;
 /// Source frames in a row that must agree before Auto moves between factors and the exact grid (see `auto_grid_hz`).
 const AUTO_GRID_VOTES: u32 = 4;
+/// The least rate of Auto's grid as a multiple of the source rate. A factor needs twice the source rate; the grid does
+/// not: 60 fps on a 75 Hz display shows every fourth frame twice, and 75 pictures at their own media time are even.
+const AUTO_GRID_MIN_RATIO: f64 = 1.15;
 const AUTO_HOLD_MS: f64 = 1000.0;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -970,6 +973,7 @@ impl Pacer {
             headroom: self.opts.display_headroom,
             compute_budget: self.opts.compute_budget,
             max_mids: self.opts.queue_capacity - 1,
+            min_ratio: if self.auto_exact { AUTO_GRID_MIN_RATIO } else { 2.0 },
         };
         let mut plan = resolve_output_rate(&inputs);
         // the GPU looks too slow for 2x: one real pair with tiny assumed costs every 2.5 s measures it, while a
@@ -1052,7 +1056,7 @@ impl Pacer {
     /// frames, even on screen only when the display runs at a whole multiple of a regular source; 24 fps on a 60 Hz
     /// display as x2 is 48 pictures a second on 60 ticks, a quarter of them held twice. There Auto takes the grid in
     /// media time instead: the display's rate, or the whole fraction of it that the GPU, the motion and the drop
-    /// penalty leave, never under twice the source. A host that cannot present on every tick keeps the factors.
+    /// penalty leave, down to 1.15 times the source. A host that cannot present on every tick keeps the factors.
     fn auto_grid_hz(&self) -> Option<f64> {
         let source_hz = self.source.source_hz()?;
         let d = self.display.measure();
@@ -1076,7 +1080,8 @@ impl Pacer {
             f64::INFINITY
         };
         let limit = by_gpu.min(by_motion).min(self.opts.max_factor as f64 + 1.0);
-        let rates: Vec<f64> = (1..=8).map(|k| d.display_hz / k as f64).filter(|r| *r >= 1.95 * source_hz).collect();
+        let least = AUTO_GRID_MIN_RATIO * source_hz;
+        let rates: Vec<f64> = (1..=8).map(|k| d.display_hz / k as f64).filter(|r| *r >= least).collect();
         let first = rates.iter().position(|r| r / source_hz <= limit).unwrap_or(rates.len().checked_sub(1)?);
         rates.get((first + self.control.penalty() as usize).min(rates.len() - 1)).copied()
     }

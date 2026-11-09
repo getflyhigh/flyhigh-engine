@@ -5,6 +5,8 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-10
+
 ### Changed
 
 - Auto on a display that is not a whole multiple of the source rate runs on the exact grid: every tick of the display
@@ -14,7 +16,9 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
   2.5 %, 25 fps on 60 Hz 20 % to 1.9 %, 50 fps on 120 Hz 20 % to 2.5 %, 25 and 50 fps on 240 Hz 17 to 40 % to 2 to
   4 % (what remains is scene cuts). The same holds for 60 fps on 144 or 165 Hz. A display at a whole multiple keeps
   the factors and the source frames with them; a host with a present limit below the refresh rate keeps the factors
-  too; under twice the source rate nothing is generated, as before.
+  too. The grid needs no doubling, so Auto also serves displays under twice the source rate (down to 1.15 times):
+  60 fps on 75 Hz, where every fourth frame was shown twice, is 75 pictures at their own time (measured as 60 fps on
+  80 Hz: 33 % off pace to 1.6 %; 50 fps on 60 Hz: 20 % to 0.9 %).
 - Display Hz mode and a target at the display's rate use the whole rate, on the measured tick period: the 97 %
   headroom left a tick without a new frame every 33 ticks, a held picture twice a second on a 60 Hz display (a 24 fps
   pan on 240 Hz: 1.5 to 5 % of the pictures off pace to 0.5 %). `display_headroom` remains for Auto's factors, a
