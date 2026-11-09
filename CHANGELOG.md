@@ -5,12 +5,14 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-09
+
 ### Fixed
 
 - Target and Display Hz modes put the tick nearest each source frame onto that frame wherever it stood, up to half a
   step off its time: 23.976 fps at 60 showed phases 0, .41, .81, 1.0, 1.61 instead of 0, .4, .8, 1.2, 1.6, a shake
-  on slow pans (found by yoru). A tick shows the source frame only where it lands on it; Target 60 on a 24 fps pan:
-  60 % of the pictures off pace to under 6 %.
+  on slow pans. A tick shows the source frame only where it lands on it; Target 60 on a 24 fps pan: 60 % of the
+  pictures off pace to under 6 %.
 - Static protection broke thin lines on camera pans. In a panned flat fill (anime line art) the fill between where a
   line is in the two frames reads unchanged in both, so the age pass held it as an overlay and the in-between's line
   was erased there: a dotted, broken outline over the whole pan (on a user's 720p anime pan, about 2500 pixels per
