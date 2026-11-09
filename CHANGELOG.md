@@ -16,11 +16,14 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
   was erased there: a dotted, broken outline over the whole pan (on a user's 720p anime pan, about 2500 pixels per
   in-between). A pixel flat in both frames now counts as changed; crosshairs, text and panel borders are held as
   before (crosshair error 1.8 against 7.0 unprotected, unchanged).
-- Pacing on a 24 fps video at a factor below the display's rate (x5 on 240 Hz): the source and the display drift
-  apart (23.976 fps on 240 Hz, about 1 ms a second), and the due-time shift re-centred in jumps, a hitch about every
-  second. It now follows the phase a little on every due and slips a whole tick only when the drift has used one up;
-  at the display's own rate it holds still. Off-pace pictures on that pan: 6.3 % to 4.8 % (median of 5 runs), 60 fps
-  game footage 0.9 % to 0.6 %.
+- The tick lock. A frame was presented on the first tick past its due time, and due times carry a few milliseconds
+  of jitter (a browser delivers a 24 fps video up to 20 ms early or late frame by frame): every crossing of a tick
+  boundary left one picture up three ticks and the next one. A frame due a whole number of ticks after the one before
+  it is now held to that many ticks, and slips one only when it runs a tick and the jitter's reach late. x5 of
+  23.976 fps on 240 Hz, a camera pan in Chrome: 4 to 7 % of the pictures off pace to 0 to 0.6 % (5 runs each); 60 fps
+  game footage 0 to 0.7 %. The due-time shift of 0.3.3 is gone with it.
+- A cold start ran Auto on the bare 10 ms cost default until the first timestamp query, a second at x4 of 24 fps
+  (uneven on 240 Hz). Auto sizes by the host's cost seeds until then.
 - The drop penalty stepped x4 down to x3 at 60 fps on 240 Hz, the uneven rate the even cadence avoids, and a run
   that had drawn a penalty showed it for six seconds (9 to 16 % of the pictures off pace). It now steps along the even
   factors: x4, x2, x1.

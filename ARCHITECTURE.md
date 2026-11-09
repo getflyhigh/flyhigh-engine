@@ -183,8 +183,9 @@ Inside, in the order a tick runs:
    factor in use does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor,
    the display headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the
    source interval, the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact
-   modes hold their plan until a different one has been proposed 16 frames in a row. When the GPU looks too slow for 2x,
-   one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
+   modes hold their plan until a different one has been proposed 16 frames in a row. Until the costs are measured Auto
+   sizes by the host's seeds (`mid_cost_seed_ms`, `pair_cost_seed_ms`). When the GPU looks too slow for 2x, one real
+   pair with tiny assumed costs every 2.5 s measures it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
    across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at phase
    t; cuts and holds disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of a step)
@@ -197,13 +198,13 @@ Inside, in the order a tick runs:
    needs the next one, so (1 - 1/N) x interval + pair + frame + present cost + the arrival jitter (a decaying envelope
    of how late frames come against the schedule clock) + burst pad, with no floor; it rises 2 ms per frame and falls
    0.25, so the jitter it follows does not squeeze the timeline.
-5. **Presentation queue** (`queue.rs`). Bounded (24), ordered by due time; outside the exact modes, when the output
-   rate divides the display's and is below it, a shift keeps the due times halfway between ticks, following the
-   phase a little on every due (source and display clocks drift apart, 23.976 fps on 240 Hz by about 1 ms a second)
-   and wrapping by a whole tick when the drift has used one up; one presentation per tick; the oldest entry
+5. **Presentation queue** (`queue.rs`). Bounded (24), ordered by due time; one presentation per tick; the oldest entry
    inside the lateness contract (3 output intervals) is presented when the display can service the target, else the
    newest due. Entries before it are dropped and counted; entries due before the last presented one are stale. A
-   requested mid that is not there in time shows its anchor instead (`fallback`).
+   requested mid that is not there in time shows its anchor instead (`fallback`). The tick lock: a frame due a whole
+   number n of ticks (2 to 8) after the one before it is not presented sooner than n ticks after that one was, so
+   due-time jitter crossing a tick boundary no longer leaves one picture up three ticks and the next one; past a tick
+   plus 4 to 8 ms late it goes out at once, the slip two drifting clocks force.
 6. **Auto controller** (`control.rs`, AIMD). Drop pressure is a leaky integrator (tau 300 ms); several frames due in
    one tick count as one event; drops within 20 ms after a host stall are not charged while stalls are rarer than 4
    per 2 s, and a missed vsync (a tick gap over 1.5 floors) or a single drop at the display's own rate counts as

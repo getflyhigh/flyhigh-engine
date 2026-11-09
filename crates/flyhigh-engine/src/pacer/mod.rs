@@ -454,9 +454,6 @@ pub struct Pacer {
     /// Since when Auto has asked for a higher (true) or a lower factor than the one in use.
     auto_candidate: Option<(bool, f64)>,
     auto_changed_at: f64,
-    /// Added to every due time so the dues fall halfway between display ticks (see `on_tick_grid`).
-    due_shift_ms: f64,
-    due_phase_locked: bool,
     last_tick: Option<f64>,
     last_present_wall: f64,
     last_pts: Option<f64>,
@@ -500,8 +497,6 @@ impl Pacer {
             factor: 2,
             auto_candidate: None,
             auto_changed_at: f64::NEG_INFINITY,
-            due_shift_ms: 0.0,
-            due_phase_locked: false,
             last_tick: None,
             last_present_wall: f64::NEG_INFINITY,
             last_pts: None,
@@ -550,7 +545,6 @@ impl Pacer {
         self.motion_avg = 0.0;
         self.auto_candidate = None;
         self.auto_changed_at = f64::NEG_INFINITY;
-        self.due_phase_locked = false;
         self.last_pts = None;
         self.prev = None;
         self.prev2 = None;
@@ -693,52 +687,11 @@ impl Pacer {
         self.pair_cost.or(self.opts.pair_cost_seed_ms)
     }
 
-    fn enqueue(&mut self, mut e: Entry) {
-        e.due = self.on_tick_grid(e.due);
+    fn enqueue(&mut self, e: Entry) {
         if self.queue.enqueue(e).is_some() {
             self.counters.evicted += 1;
             self.counters.drops += 1;
         }
-    }
-
-    /// A due time sitting on a display tick is shown on that tick or the next one depending on a fraction of a
-    /// millisecond of jitter, so a steady x2 alternated 4 and 12 ms gaps (measured: late flipping between 0.1 and 4.1
-    /// ms on a 240 Hz display). A shift keeps the dues halfway between ticks. It follows the phase a little on every
-    /// due, because the source and the display drift apart steadily (23.976 fps on 240 Hz: about 1 ms a second) and
-    /// re-centring in jumps a quarter tick off put a hitch every second; it wraps by a whole tick only when the drift
-    /// has used one up, the one slip the two clocks force. Exact modes have their own grid.
-    fn on_tick_grid(&mut self, due: f64) -> f64 {
-        let display = self.display.measure();
-        let (Some(tick), true) =
-            (self.last_tick, self.display.ready() && display.measured && !self.opts.exact_cadence())
-        else {
-            return due;
-        };
-        let period = 1000.0 / display.display_hz;
-        // only an output rate that divides the display's puts its dues at one phase; any other spreads them over the
-        // whole tick, where following the phase says nothing
-        let even = self.source.source_hz().is_some_and(|hz| {
-            rate::display_multiple(self.factor.max(1) as f64 * hz, display.display_hz).is_some()
-                || (self.factor.max(1) as f64 * hz - display.display_hz).abs() <= display.display_hz * 0.01
-        });
-        // at the display's own rate every tick takes the next frame whatever its phase, and following the phase only
-        // added slips (60 fps on 240 Hz: 1.7 % of the pictures off pace against 0.9 % without)
-        if !even || self.at_display_rate() {
-            return due + self.due_shift_ms;
-        }
-        let x = (due + self.due_shift_ms - tick).rem_euclid(period);
-        if self.due_phase_locked {
-            self.due_shift_ms -= 0.05 * (x - period / 2.0);
-        } else {
-            self.due_shift_ms += period / 2.0 - x;
-            self.due_phase_locked = true;
-        }
-        if self.due_shift_ms > period / 2.0 {
-            self.due_shift_ms -= period;
-        } else if self.due_shift_ms < -period / 2.0 {
-            self.due_shift_ms += period;
-        }
-        due + self.due_shift_ms
     }
 
     fn enqueue_source(&mut self, id: u32, at: f64) {
@@ -777,6 +730,31 @@ impl Pacer {
         }
     }
 
+    /// The tick lock. A frame due a whole number n of ticks after the one before it is not shown sooner than n ticks
+    /// after that one was shown. Due times carry a few milliseconds of jitter (a browser delivers a 24 fps video up to
+    /// 20 ms early or late frame by frame, and the schedule clock passes part of that on); on the plain rule, the
+    /// first tick past the due time, every crossing of a tick boundary left one picture up for three ticks and the
+    /// next for one: x5 of 24 fps on 240 Hz, 5 % of the pictures off pace on a pan. Held to its n ticks, a frame that
+    /// came a tick late is followed in step, the lateness sits a tick higher, and jitter no longer reaches a boundary.
+    /// The due time stays the long-term reference: past a tick and the jitter's reach late, the frame goes out at
+    /// once, the one slip two drifting clocks force. Spacings that are no whole number of ticks (72 fps on 240 Hz),
+    /// the display's own rate and a backlog keep the plain rule.
+    fn tick_lock(&self, now: f64, due: Option<usize>) -> Option<usize> {
+        if due != Some(0) || !self.display.ready() {
+            return due;
+        }
+        let head = &self.queue.entries()[0];
+        let tick = self.display.floor_ms();
+        let spacing = head.due - self.queue.last_presented_due();
+        let n = (spacing / tick).round();
+        if !(spacing.is_finite() && (2.0..=8.0).contains(&n) && (spacing - n * tick).abs() <= 0.25 * tick) {
+            return due;
+        }
+        let elapsed = ((now - self.last_present_wall) / tick).round();
+        let reach = tick + tick.clamp(4.0, 8.0);
+        due.filter(|_| elapsed >= n || now - head.due > reach)
+    }
+
     /// The display tick: the heartbeat.
     pub fn display_tick(&mut self, now: f64) -> Tick {
         self.log(TraceEvent::Tick { t: now });
@@ -804,7 +782,7 @@ impl Pacer {
         let target_hz = self.presentation_target_hz();
         let capacity_hz = self.display.measure().capacity_hz;
         let selection = self.queue.select_due(now, target_hz, capacity_hz, self.opts.lateness_intervals);
-        let mut due = selection.index;
+        let mut due = self.tick_lock(now, selection.index);
         if due.is_some() && now - self.last_present_wall < self.opts.min_present_interval_ms {
             due = None;
             self.counters.held_by_host_limit += 1;
@@ -1071,8 +1049,10 @@ impl Pacer {
         let display = display::measure_display_hz(self.display.policy_sample_ms(), self.opts.min_present_interval_ms);
         auto_factor(&AutoInputs {
             max_factor: self.opts.max_factor,
-            mid_cost_ms: self.mid_cost.value(),
-            pair_cost_ms: self.pair_cost.value(),
+            // the host's seeds until the costs are measured: on the bare default (10 ms a frame) a cold start ran a
+            // second at x4 of 24 fps before the first timestamp query let it reach the even x5
+            mid_cost_ms: self.mid_cost(),
+            pair_cost_ms: self.pair_cost(),
             source_hz,
             unique_interval_ms: self.source.unique_ms(),
             wall_interval_ms: self.source.wall_ms(),

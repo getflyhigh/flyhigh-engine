@@ -285,6 +285,53 @@ fn the_drop_penalty_steps_along_the_even_factors() {
 }
 
 #[test]
+fn the_tick_lock_keeps_the_cadence_through_jittered_arrivals() {
+    // 24 fps at x5 on 240 Hz, every picture two ticks; the frames arrive up to 12 ms early or late (a browser's
+    // decode), which moves the due times across tick boundaries
+    let opts = PacerOptions { mode: RateMode::Factor(5), mid_cost_seed_ms: 0.3, ..PacerOptions::default() };
+    let mut pacer = Pacer::new(&opts).unwrap();
+    let (tick, interval) = (1000.0 / 240.0, 1000.0 / 24.0);
+    let mut seed = 7u64;
+    let mut rnd = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let arrivals: Vec<f64> = (0..240).map(|n| 20.0 + n as f64 * interval + (rnd() - 0.5) * 24.0).collect();
+    let (mut next, mut outputs, mut last, mut gaps) = (0usize, 0u32, None::<i64>, Vec::new());
+    for i in 0..(10_000.0 / tick) as i64 {
+        let now = i as f64 * tick;
+        while next < arrivals.len() && arrivals[next] <= now {
+            let f = SourceFrame {
+                id: next as u32,
+                pts_ms: next as f64 * interval,
+                kind: IntervalKind::Motion,
+                motion: Some(8.0),
+                skipped: 0,
+            };
+            for r in pacer.source_frame(arrivals[next], f) {
+                outputs += 1;
+                pacer.generated(arrivals[next], r.id, Frame::Output(outputs));
+            }
+            next += 1;
+        }
+        let t = pacer.display_tick(now);
+        for r in t.generate {
+            outputs += 1;
+            pacer.generated(now, r.id, Frame::Output(outputs));
+        }
+        if t.present.is_some() {
+            if let (Some(l), true) = (last, now > 3000.0) {
+                gaps.push(i - l);
+            }
+            last = Some(i);
+        }
+    }
+    let off = gaps.iter().filter(|g| **g != 2).count();
+    assert!(gaps.len() > 700, "x5 runs: {} presents", gaps.len());
+    assert!(off * 100 <= gaps.len(), "{off} of {} pictures were not up for two ticks", gaps.len());
+}
+
+#[test]
 fn firefox_stalls_are_not_charged_to_auto() {
     // 60 Hz ticks with a 70 ms compositor stall every 1.5 s, the host's 7 ms present limit in force
     let trace = synth(15_000.0, 24.0, 2.0, 3.0, |t| if t.rem_euclid(1500.0) < 16.7 { 70.0 } else { 1000.0 / 60.0 });
@@ -408,7 +455,8 @@ fn recorded_firefox_session_keeps_auto_through_its_stalls() {
 #[test]
 fn recorded_firefox_reference_host_runs_a_minute_without_stalls() {
     // the reference web host (examples/web) in Firefox: the same display and video, nothing but the engine's Stream and
-    // Pacer on the page. A minute at 240 Hz ticks with the 7 ms present limit: no compositor stalls, one drop.
+    // Pacer on the page. A minute at 240 Hz ticks with the 7 ms present limit: no compositor stalls, one drop. Firefox
+    // has no timestamp queries, so Auto sizes by the host's cost seed throughout (x5; on the bare 10 ms default, x4).
     let trace = recorded("firefox-refhost-auto");
     let opts = trace.options.clone().expect("the host recorded its options");
     assert_eq!((opts.min_present_interval_ms, opts.gpu_timestamps), (7.0, false));
@@ -418,7 +466,7 @@ fn recorded_firefox_reference_host_runs_a_minute_without_stalls() {
     assert!(c.drops <= 2, "{c:?}");
     assert!(r.factor_max <= 5, "the 7 ms limit caps the factor at 142.86 Hz: {}", r.factor_max);
     let total: u64 = r.seconds.iter().map(|s| s.presents).sum();
-    assert!((4400..=4800).contains(&total), "about 84 presents per second over 55 s: {total}");
+    assert!((5700..=6100).contains(&total), "about 107 presents per second over 55 s: {total}");
     assert!(c.cuts > 100, "the anime fixture's cuts are classified: {}", c.cuts);
 }
 

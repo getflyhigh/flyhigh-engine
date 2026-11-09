@@ -92,6 +92,11 @@ impl PresentationQueue {
         Selection { index: Some(index), due_count: newest + 1, drop_count: index }
     }
 
+    /// The deadline of the last entry presented (negative infinity before the first).
+    pub fn last_presented_due(&self) -> f64 {
+        self.last_presented_due
+    }
+
     /// Takes the entry at `index` as presented and discards everything before it.
     pub fn present(&mut self, index: usize) -> Entry {
         let e = self.entries[index].clone();
