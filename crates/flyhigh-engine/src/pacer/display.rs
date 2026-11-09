@@ -8,6 +8,7 @@ pub(crate) const NOMINAL_RATE_TOLERANCE: f64 = 0.03;
 const SAMPLE_RELATIVE_TOLERANCE: f64 = 0.08;
 const SAMPLE_QUANTIZATION_MS: f64 = 1.05;
 const STABILITY_CV: f64 = 0.12;
+const PERIOD_WINDOW: usize = 720;
 const SERVICE_WINDOW: usize = 32;
 const TRANSITION_SAMPLES: usize = 10;
 const FASTER_MISS_BUDGET: u32 = 3;
@@ -99,6 +100,8 @@ pub struct DisplayEstimator {
     slower: Vec<f64>,
     tick_ms: f64,
     host_min_present_ms: f64,
+    /// Recent tick gaps with the whole number of refresh periods each spans, for `period_ms`.
+    spans: std::collections::VecDeque<(f64, f64)>,
 }
 
 impl DisplayEstimator {
@@ -114,6 +117,7 @@ impl DisplayEstimator {
             slower: Vec::new(),
             tick_ms: 0.0,
             host_min_present_ms,
+            spans: std::collections::VecDeque::new(),
         }
     }
 
@@ -133,6 +137,7 @@ impl DisplayEstimator {
                 self.tick_ms * 0.97 + d * 0.03
             };
             self.update_interval(d);
+            self.span(d);
             let agrees = ((d - self.floor_ms) / self.floor_ms).abs() <= 0.06;
             self.stable_samples = if agrees { (self.stable_samples + 1).min(SERVICE_WINDOW) } else { 0 };
             Some(d)
@@ -141,6 +146,32 @@ impl DisplayEstimator {
                 self.stable_samples = 0;
             }
             None
+        }
+    }
+
+    fn span(&mut self, d: f64) {
+        let n = (d / self.floor_ms).round();
+        if !self.confirmed || n < 1.0 || (d - n * self.floor_ms).abs() > 0.25 * self.floor_ms {
+            return;
+        }
+        if self.spans.back().is_some_and(|_| (self.period_ms() - self.floor_ms).abs() > 0.03 * self.floor_ms) {
+            self.spans.clear();
+        }
+        self.spans.push_back((d, n));
+        if self.spans.len() > PERIOD_WINDOW {
+            self.spans.pop_front();
+        }
+    }
+
+    /// The refresh period as the mean over the last ticks (missed ticks counted as the periods they span): the
+    /// service floor is a conservative single-gap figure, half a percent long on a clock with 0.1 ms steps, while a
+    /// grid that must stay on the ticks needs the period itself. The floor until enough ticks are in.
+    pub fn period_ms(&self) -> f64 {
+        let (time, periods) = self.spans.iter().fold((0.0, 0.0), |a, s| (a.0 + s.0, a.1 + s.1));
+        if periods >= 30.0 {
+            time / periods
+        } else {
+            self.floor_ms
         }
     }
 
@@ -238,14 +269,17 @@ impl DisplayEstimator {
         self.stable_samples
     }
 
+    /// By the tick period once it is known: the floor reads a 240 Hz display on a 0.1 ms clock as 238.6 Hz, under
+    /// what x4 of 60 fps needs, and the queue then dropped the frames a display at its own rate would have shown a
+    /// tick later (the drops drew a penalty: no in-betweens for six seconds of fast motion).
     pub fn measure(&self) -> DisplayMeasure {
-        measure_display_hz(self.floor_ms, self.host_min_present_ms)
+        measure_display_hz(self.period_ms(), self.host_min_present_ms)
     }
 
     /// The interval the Auto policy sizes against: the service floor once confirmed, else the tick EMA.
     pub fn policy_sample_ms(&self) -> f64 {
         if self.ready() {
-            self.floor_ms
+            self.period_ms()
         } else if self.tick_ms > 1.0 {
             self.tick_ms
         } else {

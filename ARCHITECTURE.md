@@ -163,41 +163,53 @@ executable version of this paragraph.
 Inside, in the order a tick runs:
 
 1. **Display estimator** (`display.rs`). From tick intervals: the refresh floor (service interval, not the fastest
-   sample), the nominal rate (snapped to 360/240/180/165/144/120/100/90/75/72/60/50 within 3 %), stability
-   (coefficient of variation <= 0.12 over 32 samples), transitions in either direction (10 agreeing samples, a faster
-   candidate survives 3 misses). Capacity = min(raw, nominal, the host's present limit). A tick gap above
-   max(25 ms, 4 x floor) is a host stall.
+   sample), the nominal rate (snapped to 360/240/180/165/144/120/100/90/75/72/60/50 within 3 %), stability (coefficient
+   of variation <= 0.12 over 32 samples), transitions in either direction (10 agreeing samples, a faster candidate
+   survives 3 misses). Capacity = min(raw, nominal, the host's present limit). A tick gap above max(25 ms, 4 x floor) is
+   a host stall. The tick period itself is the mean over the last 720 ticks (missed ticks counted as the periods they
+   span): the floor reads a 240 Hz display on a 0.1 ms clock as 238.6 Hz, and the rate, the capacity and the exact grid
+   go by the period once 30 periods are in.
 2. **Source estimator** (`source.rs`). From source pts: the interval (trimmed mean over 32 samples, snapped to common
    video rates within 1.5 %, held through 3 % noise once nominal, a transition after 4 agreeing samples outside 12 %),
    the arrival-interval EMA, the unique-frame interval (holds and cuts excluded) and the PLL schedule clock that places
-   presentations. While frames arrive within 1.5 display ticks of it, the clock steps by each frame's pts step scaled
-   by how fast frames really came against their pts over the last 2 s, and follows the arrivals at 2 %; without pts
-   or with a delivery that wanders further it steps by the arrival EMA and follows at 8 %; it resyncs hard beyond
-   80 ms and carries on over a frame the decoder skipped.
+   presentations. While frames arrive within 1.5 display ticks of it, the clock steps by each frame's pts step scaled by
+   how fast frames really came against their pts over the last 2 s, and follows the arrivals at 2 %; without pts or with
+   a delivery that wanders further it steps by the arrival EMA and follows at 8 %; it resyncs hard beyond 80 ms and
+   carries on over a frame the decoder skipped. A reset (a seek, a change of speed) keeps the decoded cadence and drops
+   the clock. The source counts as regular while fewer than a quarter of the last 16 intervals are more than 15 % off
+   the cadence.
 3. **Output rate policy** (`rate.rs`). Modes: `Factor(n)`, `Auto` (as many as the display and GPU allow, capped by
-   motion), `DisplayHz`, `Target(fps)`; Auto with `fps_limit` is a strict-ceiling target. Even cadence: when the display
-   runs at a whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to the next
-   factor dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that cannot reach an
-   even rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source exactly; the
-   display's own rate needs no headroom, every tick showing one frame (not with `low_latency`). A factor change the
-   factor in use does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor,
-   the display headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the
-   source interval, the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact
-   modes hold their plan until a different one has been proposed 16 frames in a row. Until the costs are measured Auto
-   sizes by the host's seeds (`mid_cost_seed_ms`, `pair_cost_seed_ms`). When the GPU looks too slow for 2x, one real
-   pair with tiny assumed costs every 2.5 s measures it (`probe`).
+   motion), `DisplayHz`, `Target(fps)`; Auto with `fps_limit` is a strict-ceiling target. Auto runs on factors where the
+   display is a whole multiple of a regular source, and on the exact grid where it is not (24 fps on 60 Hz, 60 fps on
+   144 Hz, 25 or 50 fps on anything, a source that skips frames): the display's rate or the whole fraction of it the
+   GPU, the motion (up to 2.5, 3.75 and 5 frames per source frame as motion rises) and the drop penalty leave, never
+   under twice the source; four source frames in a row must agree before it moves between the two, and a host with a
+   present limit below the refresh rate keeps the factors. An exact rate that is the display's or a whole fraction of it
+   is taken from the measured tick period and has no headroom (97 % of the rate left a tick without a new frame every 33
+   ticks); the headroom remains for a strict cap and a host present limit. Even cadence: when the display runs at a
+   whole multiple n of the decoded source rate (within 1 %), Auto rounds the motion ceiling up to the next factor
+   dividing n and takes the largest dividing factor the GPU allows (never x1 for it; a GPU that cannot reach an even
+   rate keeps an uneven one below half the display's rate), and `DisplayHz` outputs n x source exactly; the display's
+   own rate needs no headroom, every tick showing one frame (not with `low_latency`). A factor change the factor in use
+   does not force waits until Auto has asked for it 250 ms and the last change is 1 s old. The 2x floor, the display
+   headroom (0.97), compute capacity from the pair / mid / present costs within `compute_budget` of the source interval,
+   the queue capacity, the clamp reason (display / gpu / runtime / minimum) and a warning text. Exact modes hold their
+   plan until a different one has been proposed 16 frames in a row (the first plan after measuring starts at once).
+   Until the costs are measured Auto sizes by the host's seeds (`mid_cost_seed_ms`, `pair_cost_seed_ms`). When the GPU
+   looks too slow for 2x, one real pair with tiny assumed costs every 2.5 s measures it (`probe`).
 4. **Presentation planner** (`plan.rs`). Exact modes: target ticks on the exact output grid in media phase, carried
-   across intervals; each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at phase
-   t; cuts and holds disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of a step)
-   shows that frame, every other tick interpolates at its own phase. Factor modes: mids at k / n of the interval and the
-   source frame at its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid
-   cost + 25 ms + burst pad, floor 60 ms or 42 ms when a frame is cheap and the steady factor is 3 or less, max 180 ms)
-   sets how far ahead frames are due; it drifts 0.25 ms per frame and rises 2 ms per frame only while frames run late
-   (exact modes: a whole interval). Factor-mode mids are spread over the clock's own step. With `low_latency` (games)
-   the target is what the first in-between needs and no more: it is due 1/N of an interval after its source frame and
-   needs the next one, so (1 - 1/N) x interval + pair + frame + present cost + the arrival jitter (a decaying envelope
-   of how late frames come against the schedule clock) + burst pad, with no floor; it rises 2 ms per frame and falls
-   0.25, so the jitter it follows does not squeeze the timeline.
+   across intervals, each pair as long as its timestamps say (a browser at 1.5x delivers steps of one and two frames);
+   each tick becomes one presentation, an anchor (`previous` / `current`) or an `interpolate` at phase t; cuts and holds
+   disable interpolation but keep the grid; a tick that lands on a source frame (within 5 % of a step) shows that frame,
+   every other tick interpolates at its own phase. Factor modes: mids at k / n of the interval and the source frame at
+   its arrival plus the delay. The delay target (pair lookahead in exact modes + pair cost + 2 x mid cost + 25 ms +
+   burst pad, floor 60 ms or 42 ms when a frame is cheap and the steady factor is 3 or less, max 180 ms) sets how far
+   ahead frames are due; it drifts 0.25 ms per frame and rises 2 ms per frame only while frames run late (exact modes: a
+   whole interval). Factor-mode mids are spread over the clock's own step. With `low_latency` (games) the target is what
+   the first in-between needs and no more: it is due 1/N of an interval after its source frame and needs the next one,
+   so (1 - 1/N) x interval + pair + frame + present cost + the arrival jitter (a decaying envelope of how late frames
+   come against the schedule clock) + burst pad, with no floor; it rises 2 ms per frame and falls 0.25, so the jitter it
+   follows does not squeeze the timeline.
 5. **Presentation queue** (`queue.rs`). Bounded (24), ordered by due time; one presentation per tick; the oldest entry
    inside the lateness contract (3 output intervals) is presented when the display can service the target, else the
    newest due. Entries before it are dropped and counted; entries due before the last presented one are stale. A

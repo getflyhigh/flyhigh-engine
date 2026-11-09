@@ -5,6 +5,40 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Auto on a display that is not a whole multiple of the source rate runs on the exact grid: every tick of the display
+  (or every nth) shows a picture at its own media time. Factors put in-betweens at k / n between two frames, which is
+  even on screen only at whole multiples; 24 fps on a 60 Hz display as x2 was 48 pictures on 60 ticks. Pictures off
+  pace in Chrome (a 240 Hz panel presenting on every 4th or 2nd tick for 60 and 120 Hz): 24 fps on 60 Hz 25.5 % to
+  2.5 %, 25 fps on 60 Hz 20 % to 1.9 %, 50 fps on 120 Hz 20 % to 2.5 %, 25 and 50 fps on 240 Hz 17 to 40 % to 2 to
+  4 % (what remains is scene cuts). The same holds for 60 fps on 144 or 165 Hz. A display at a whole multiple keeps
+  the factors and the source frames with them; a host with a present limit below the refresh rate keeps the factors
+  too; under twice the source rate nothing is generated, as before.
+- Display Hz mode and a target at the display's rate use the whole rate, on the measured tick period: the 97 %
+  headroom left a tick without a new frame every 33 ticks, a held picture twice a second on a 60 Hz display (a 24 fps
+  pan on 240 Hz: 1.5 to 5 % of the pictures off pace to 0.5 %). `display_headroom` remains for Auto's factors, a
+  capped Auto and a host present limit.
+
+### Fixed
+
+- A source that skips frames is paced by its timestamps. A browser playing 60 fps at 1.5x delivers two of every three
+  frames; Auto read the rate as more than the display has and generated nothing, and the exact modes gave every pair
+  the average length (50 to 75 % of the pictures off pace). Auto takes the exact grid for such a source and each
+  pair is as long as its timestamps say: 0.5 % off pace at 120 pictures a second.
+- The display's rate was measured half a percent low on a clock with 0.1 ms steps (240 Hz as 238.6), and the
+  presentation target of a factor went by the arrival average (x4 of 60 fps as 241 to 247 fps): at the display's own
+  rate the queue dropped frames it could have shown a tick later, the drops drew a penalty, and fast motion lost its
+  in-betweens for six seconds in about one run in three. The rate goes by the mean tick period and the target by the
+  decoded cadence.
+- An exact mode started generating a second after every start and seek (the first plan waited 16 frames like a
+  change of plan): at once now, 0.5 s to 0.1 s at 24 fps.
+- A seek or a change of speed threw the decoded cadence away, eight frames without in-betweens while it was
+  relearned (1.2 s after a change of speed). It is kept.
+- `settle_active` in the report was false before the first tick, so a host measuring its GPU costs once measured
+  inside the settle window, had the samples refused and stayed on the 10 ms seed (the reference player: x4 instead
+  of x5 in about one run in four). The report is right from the first event, and the player measures until taken.
+
 ## [0.3.5] - 2026-11-09
 
 ### Fixed

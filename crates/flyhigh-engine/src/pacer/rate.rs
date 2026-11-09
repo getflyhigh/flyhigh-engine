@@ -184,12 +184,18 @@ pub fn resolve_output_rate(i: &RateInputs) -> OutputPlan {
     } else {
         d.capacity_hz
     };
-    // a request at the display ceiling reserves a little presentation service for bounded catch-up after a tick
-    // hitch; the reserve never violates the strict 2x floor
+    // a request at the ceiling of a host that cannot present on every tick (a present limit below the refresh rate) or
+    // of a strict cap reserves a little presentation service for catch-up; the reserve never violates the strict 2x
+    // floor. On the display's own rate there is nothing to reserve: 97 % of it left a tick without a new frame every
+    // 33 ticks, a held picture twice a second on a 60 Hz display, where the full rate (the Pacer puts the grid on the
+    // measured tick period) holds one only when the clocks have drifted a whole tick apart
     let headroom_display = d.capacity_hz * i.headroom;
     let targets_ceiling = requested >= d.capacity_hz;
     let fill_panel = i.fill_display && !i.strict_ceiling;
-    let use_headroom = targets_ceiling && !fill_panel && (i.strict_ceiling || headroom_display + tolerance >= minimum);
+    let host_capped = d.capacity_hz < d.display_hz * 0.97;
+    let use_headroom = targets_ceiling
+        && !fill_panel
+        && (i.strict_ceiling || (host_capped && headroom_display + tolerance >= minimum));
     let display_limit = if !i.limit_to_display {
         f64::INFINITY
     } else if use_headroom {
@@ -506,6 +512,16 @@ impl RateStabilizer {
             self.candidate = None;
             self.candidate_samples = 0;
             return (self.stable(plan), false);
+        }
+        // nothing runs on a grid yet (measuring, or no 2x): there is no output clock to protect, and holding the first
+        // real plan back 16 frames kept an exact mode at the source rate for a second after every start and seek
+        let idle = !matches!(previous.state, RateState::Active | RateState::ProbingGpu);
+        if idle && next.state == RateState::Active {
+            self.identity = Some(next);
+            self.snapshot = Some(plan.clone());
+            self.candidate = None;
+            self.candidate_samples = 0;
+            return (plan, true);
         }
         match &self.candidate {
             Some(c) if !c.differs(&next) => self.candidate_samples += 1,

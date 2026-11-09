@@ -291,14 +291,18 @@ impl Player {
     }
     /// GPU time of the pair and of one generated frame, once, from timestamp queries: the Pacer's budget.
     fn measure_costs(&mut self) {
-        self.costs_measured = true;
         let now = self.now_ms();
         let pair = self.stream.pair_cost_ms(self.engine.gpu());
         let mid = self.stream.frame_cost_ms(self.engine.gpu(), 0);
+        // measured once, but only once the Pacer took it: a sample it refuses (a settle window) leaves it on the seeds
+        self.costs_measured = true;
         for (stage, ms) in [(Stage::Pair, pair), (Stage::Mid, mid)] {
             if let Some(ms) = ms {
-                self.pacer.cost_sample(now, stage, ms);
+                self.costs_measured &= self.pacer.cost_sample(now, stage, ms);
             }
+        }
+        if !self.costs_measured {
+            return;
         }
         let r = self.pacer.report();
         println!("[player] GPU costs: pair {:.2} ms, generated frame {:.2} ms", r.pair_cost_ms, r.mid_cost_ms);

@@ -180,6 +180,8 @@ pub struct SourceEstimator {
     sched_t: Option<f64>,
     /// How far the schedule clock moved on the last frame: the interval its in-betweens are spread over.
     sched_step_ms: Option<f64>,
+    /// The last decoded intervals as they came, for `regular`.
+    raw: std::collections::VecDeque<f64>,
     /// The last two seconds of (arrival, timestamp step): how fast frames really come against their timestamps.
     steps: std::collections::VecDeque<(f64, f64)>,
     playback_rate: f64,
@@ -204,6 +206,7 @@ impl SourceEstimator {
             last_arrival: None,
             sched_t: None,
             sched_step_ms: None,
+            raw: std::collections::VecDeque::new(),
             steps: std::collections::VecDeque::new(),
             playback_rate: 1.0,
         }
@@ -220,6 +223,10 @@ impl SourceEstimator {
     /// One decoded interval (media time between consecutive frames, per frame when frames were skipped). Returns
     /// true when a sustained rate change was accepted: the window is restarted on the new cadence.
     pub fn push_decoded(&mut self, sample_ms: f64) -> bool {
+        self.raw.push_back(sample_ms);
+        if self.raw.len() > 16 {
+            self.raw.pop_front();
+        }
         if !(sample_ms > 0.5 && sample_ms < 2000.0) {
             self.transition = Transition::default();
             return false;
@@ -360,6 +367,14 @@ impl SourceEstimator {
         estimate_auto_source_hz(self.decoded_ms, &self.samples, self.wall_ms, self.playback_rate)
     }
 
+    /// Whether the frames come one decoded interval apart. A browser playing 60 fps at 1.5x delivers two of every
+    /// three frames (steps of one and two intervals), a variable-rate recording wanders: in-betweens at k / n between
+    /// such frames move at an uneven pace, so they belong on a grid in media time.
+    pub fn regular(&self) -> bool {
+        let off = self.raw.iter().filter(|d| (**d - self.decoded_ms).abs() > 0.15 * self.decoded_ms).count();
+        self.raw.len() < 8 || off * 4 < self.raw.len()
+    }
+
     pub fn decoded_ms(&self) -> f64 {
         self.decoded_ms
     }
@@ -396,9 +411,20 @@ impl SourceEstimator {
         self.last_unique_at = Some(now);
     }
 
+    /// A seek or a decoder gap: the clock and the arrival history go, the decoded cadence stays. A video keeps its
+    /// frame rate across a seek, and relearning it (eight frames, a third of a second at 24 fps) left every seek and
+    /// every change of speed without in-betweens that long; another source with another rate is picked up as any
+    /// rate change is.
     pub fn reset(&mut self) {
-        let rate = self.playback_rate;
+        let (rate, decoded, samples) = (self.playback_rate, self.decoded_ms, std::mem::take(&mut self.samples));
+        let known = samples.len() >= 8;
         *self = SourceEstimator::new();
         self.playback_rate = rate;
+        if known {
+            self.decoded_ms = decoded;
+            self.samples = samples;
+            self.wall_ms = decoded / rate;
+            self.unique_ms = self.wall_ms;
+        }
     }
 }

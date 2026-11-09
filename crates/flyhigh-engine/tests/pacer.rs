@@ -331,6 +331,100 @@ fn the_tick_lock_keeps_the_cadence_through_jittered_arrivals() {
     assert!(off * 100 <= gaps.len(), "{off} of {} pictures were not up for two ticks", gaps.len());
 }
 
+// Drives a Pacer the way a host does (ticks, source frames, every request generated at once) and returns what each
+// presenting tick showed after the first three seconds: (tick index, media time in wall milliseconds, factor).
+fn shown(opts: &PacerOptions, tick_ms: f64, frames: &[(f64, f64)], rate: f64) -> Vec<(i64, f64, u32)> {
+    let mut pacer = Pacer::new(opts).unwrap();
+    let mut content: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
+    let (mut next, mut outputs, mut out) = (0usize, 0u32, Vec::new());
+    let mut issue =
+        |pacer: &mut Pacer, now: f64, reqs: Vec<Request>, content: &mut std::collections::HashMap<u32, f64>| {
+            for r in reqs {
+                outputs += 1;
+                let (a, b) = (frames[r.previous as usize].1, frames[r.current as usize].1);
+                content.insert(outputs, (a + r.t as f64 * (b - a)) / rate);
+                pacer.generated(now, r.id, Frame::Output(outputs));
+            }
+        };
+    let end = frames.last().unwrap().0;
+    for i in 0..(end / tick_ms) as i64 {
+        let now = i as f64 * tick_ms;
+        while next < frames.len() && frames[next].0 <= now {
+            let f = SourceFrame {
+                id: next as u32,
+                pts_ms: frames[next].1,
+                kind: IntervalKind::Motion,
+                motion: Some(8.0),
+                skipped: 0,
+            };
+            let flush = pacer.source_frame(frames[next].0, f);
+            issue(&mut pacer, frames[next].0, flush, &mut content);
+            next += 1;
+        }
+        let t = pacer.display_tick(now);
+        issue(&mut pacer, now, t.generate, &mut content);
+        if let (Some(p), true) = (t.present, now > 3000.0) {
+            let media = match p.frame {
+                Frame::Source(id) => frames[id as usize].1 / rate,
+                Frame::Output(id) => content[&id],
+            };
+            out.push((i, media, t.factor));
+        }
+    }
+    out
+}
+
+// The share of pictures that stayed up longer or shorter than the media time they covered, by more than half a tick
+// (the same picture presented again counts as staying up).
+fn off_pace(shown: &[(i64, f64, u32)], tick_ms: f64) -> f64 {
+    let mut pictures: Vec<(i64, f64)> = Vec::new();
+    for &(i, media, _) in shown {
+        if pictures.last().is_none_or(|l| (l.1 - media).abs() > 0.01) {
+            pictures.push((i, media));
+        }
+    }
+    let steps: Vec<f64> = pictures.windows(2).map(|w| (w[1].1 - w[0].1) - (w[1].0 - w[0].0) as f64 * tick_ms).collect();
+    steps.iter().filter(|e| e.abs() > tick_ms / 2.0).count() as f64 / steps.len().max(1) as f64
+}
+
+fn regular(fps: f64, seconds: f64) -> Vec<(f64, f64)> {
+    (0..(seconds * fps) as usize).map(|n| (20.0 + n as f64 * 1000.0 / fps, n as f64 * 1000.0 / fps)).collect()
+}
+
+#[test]
+fn auto_takes_the_exact_grid_where_no_factor_is_even() {
+    let auto = PacerOptions { mid_cost_seed_ms: 0.3, ..PacerOptions::default() };
+    // 24 fps on a 60 Hz display: x2 would be 48 pictures on 60 ticks, every fourth held twice. On the grid every tick
+    // has its own picture at its own media time
+    let s = shown(&auto, 1000.0 / 60.0, &regular(24.0, 12.0), 1.0);
+    assert!(s.len() as f64 > 8.9 * 59.0, "a picture on every tick: {}", s.len());
+    assert!(off_pace(&s, 1000.0 / 60.0) < 0.01, "24 fps on 60 Hz: {:.3} off pace", off_pace(&s, 1000.0 / 60.0));
+    // 25 fps on 60 Hz and 50 fps on 120 Hz, the same
+    let s = shown(&auto, 1000.0 / 60.0, &regular(25.0, 12.0), 1.0);
+    assert!(off_pace(&s, 1000.0 / 60.0) < 0.01, "25 fps on 60 Hz: {:.3}", off_pace(&s, 1000.0 / 60.0));
+    let s = shown(&auto, 1000.0 / 120.0, &regular(50.0, 12.0), 1.0);
+    assert!(s.len() as f64 > 8.9 * 118.0 && off_pace(&s, 1000.0 / 120.0) < 0.01, "50 fps on 120 Hz");
+    // a display at a whole multiple of the source keeps the factors, and the source frames with them
+    let s = shown(&auto, 1000.0 / 240.0, &regular(60.0, 12.0), 1.0);
+    assert!(s.iter().all(|x| x.2 == 4), "60 fps on 240 Hz is x4");
+    assert!(off_pace(&s, 1000.0 / 240.0) < 0.01);
+    // under twice the source there is nothing to generate: 60 fps on 75 Hz stays as it is
+    let s = shown(&auto, 1000.0 / 75.0, &regular(60.0, 12.0), 1.0);
+    assert!(s.iter().all(|x| x.2 == 1));
+}
+
+#[test]
+fn a_source_that_skips_frames_is_paced_by_its_timestamps() {
+    // a browser playing 60 fps at 1.5x: 60 frames a second arrive, two of every three, so the media steps go one
+    // frame, two frames, one, two. Factors gave no in-betweens at all (the rate read as more than the display has)
+    let auto = PacerOptions { mid_cost_seed_ms: 0.3, playback_rate: 1.5, ..PacerOptions::default() };
+    let frames: Vec<(f64, f64)> =
+        (0..720).map(|n| (20.0 + n as f64 * 1000.0 / 60.0, ((n / 2) * 3 + n % 2) as f64 * 1000.0 / 60.0)).collect();
+    let s = shown(&auto, 1000.0 / 240.0, &frames, 1.5);
+    assert!(s.len() as f64 > 8.9 * 115.0, "generates: {} presents in 9 s", s.len());
+    assert!(off_pace(&s, 1000.0 / 240.0) < 0.02, "{:.3} off pace", off_pace(&s, 1000.0 / 240.0));
+}
+
 #[test]
 fn firefox_stalls_are_not_charged_to_auto() {
     // 60 Hz ticks with a 70 ms compositor stall every 1.5 s, the host's 7 ms present limit in force
@@ -338,9 +432,9 @@ fn firefox_stalls_are_not_charged_to_auto() {
     let opts = PacerOptions { min_present_interval_ms: 7.0, ..PacerOptions::default() };
     let r = run(&trace, &opts);
     assert_eq!(r.penalty_max, 0, "an isolated stall every 1.5 s never pins the factor");
-    assert!(r.steady(3).iter().all(|s| s.factor == 2), "60 Hz holds 2 x 24: {:?}", r.steady(3));
+    assert!(r.steady(3).iter().all(|s| s.factor >= 2), "24 fps on the 60 Hz grid: {:?}", r.steady(3));
     let presents = presents_per_second(&r, 3);
-    assert!(presents.iter().all(|p| *p >= 44), "48 per second minus the stalled tick: {presents:?}");
+    assert!(presents.iter().all(|p| *p >= 54), "60 per second minus the stalled ticks: {presents:?}");
     assert!(r.report.counters.drops_stall_exempt > 0, "the drops after the stalls exist and are exempt");
 }
 
@@ -367,7 +461,11 @@ fn a_mode_change_settles_without_penalty() {
     let r = run(&trace, &PacerOptions::default());
     assert_eq!(r.penalty_max, 0, "the reflow stall is not a GPU limit");
     assert!(r.report.counters.drops_settle_exempt + r.report.counters.drops_stall_exempt > 0);
-    assert!(r.seconds[7].presents >= 44 && r.seconds[7].factor == 2, "{:?}", r.seconds[7]);
+    assert!(
+        r.seconds[7].presents >= 56 && r.seconds[7].factor >= 2,
+        "24 fps on the 60 Hz grid again: {:?}",
+        r.seconds[7]
+    );
 }
 
 #[test]
@@ -378,9 +476,9 @@ fn display_hz_mode_places_frames_on_the_display_grid() {
     let plan = r.report.plan.clone().expect("an exact mode has a plan");
     assert_eq!(plan.state, RateState::Active, "{plan:?}");
     let out = plan.output_hz.unwrap();
-    assert!((out - 58.2).abs() < 0.3, "the 97 % headroom of 60 Hz: {out}");
+    assert!((out - 60.0).abs() < 0.3, "the display's own rate, no headroom: {out}");
     let presents = presents_per_second(&r, 3);
-    assert!(presents.iter().all(|p| (55..=60).contains(p)), "{presents:?}");
+    assert!(presents.iter().all(|p| (59..=61).contains(p)), "a frame on every tick: {presents:?}");
     assert!(r.steady(3).iter().all(|s| s.drops == 0), "{:?}", r.steady(3));
     assert!(r.report.counters.presented_mids > r.report.counters.presented_sources, "most grid ticks are mids");
 }
