@@ -5,6 +5,8 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-10
+
 ### Changed
 
 - With held frames detected (`held_frames`) and no cadence re-timing, the first change after a held frame is not
