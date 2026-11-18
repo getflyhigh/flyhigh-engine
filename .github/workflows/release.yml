@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   native:
@@ -88,6 +89,20 @@ jobs:
     needs: [native, web]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Release text from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 { p = 1; next } /^## \[/ { p = 0 } p' CHANGELOG.md > body.md
+          test -s body.md
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].html_url' 2>/dev/null || true)
+          if [ -n "$pr" ]; then { echo; echo "Pull request: $pr"; } >> body.md; fi
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then { echo; echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"; } >> body.md; fi
       - uses: actions/download-artifact@v4
         with:
           path: assets
@@ -96,4 +111,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: assets/*
-          generate_release_notes: true
+          body_path: body.md
