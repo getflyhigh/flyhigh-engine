@@ -1,5 +1,5 @@
 //! The pair classifier: is the interval between two source frames motion, a scene cut or a held frame. A tiny
-//! compute pass over the two textures (classify.wgsl) and an 8-byte readback; the decision lands asynchronously,
+//! compute pass over the two textures (classify.wgsl) and a 12-byte readback; the decision lands asynchronously,
 //! before the interval's first mid is due.
 use super::IntervalKind;
 use crate::gpu::memory::Buffer;
@@ -17,6 +17,11 @@ pub const GRID: (u32, u32) = (48, 27);
 const IN_FLIGHT: usize = 3;
 /// The kernel's unit: the rgb absolute difference of one cell, 0..765 in 1/255 steps.
 const CELL_MAX: f32 = 765.0;
+const STATS_BYTES: u64 = 12;
+// A coherent tile must change brightness by at least 32 levels, with enough change across the frame to distinguish
+// a flash from a small moving highlight. Flash steps use the cut path even during continuous camera motion.
+const FLASH_LUMA: u32 = 32;
+const FLASH_MEAN: f32 = 0.045;
 /// A pair over the cut threshold is a cut only when the moving pair before it differed by less than this share of
 /// the threshold. A camera flick in a game is a run of large differences (on a 60 fps capture the pair before a
 /// "cut" differed by 54 to 98 against a threshold of 90), a cut a lone spike after a calm pair (1 to 35 on anime);
@@ -95,6 +100,15 @@ impl Classification {
         }
         self
     }
+
+    fn with_history(mut self, tile_luma: u32, before: Option<f32>, th: &Thresholds) -> Self {
+        if th.cut_mean.is_some() && self.mean >= FLASH_MEAN && tile_luma >= FLASH_LUMA {
+            self.kind = IntervalKind::Cut;
+            self
+        } else {
+            self.after(before, th)
+        }
+    }
 }
 
 pub struct Classifier {
@@ -119,7 +133,7 @@ impl Classifier {
         });
         let stats = gpu.buffer(&wgpu::BufferDescriptor {
             label: Some("fh_classify_stats"),
-            size: 8,
+            size: STATS_BYTES,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -132,7 +146,7 @@ impl Classifier {
             .map(|_| {
                 let b = gpu.buffer(&wgpu::BufferDescriptor {
                     label: Some("fh_classify_stage"),
-                    size: 8,
+                    size: STATS_BYTES,
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
@@ -181,15 +195,15 @@ impl Classifier {
         });
         // one stats buffer serves overlapping classifications: the zeroing, the dispatch and the copy out are
         // queue-ordered per submit
-        gpu.queue.write_buffer(&self.stats, 0, &[0u8; 8]);
+        gpu.queue.write_buffer(&self.stats, 0, &[0u8; STATS_BYTES as usize]);
         let mut enc = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("fh_classify") });
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             pass.set_pipeline(&pipe);
             pass.set_bind_group(0, &*bg, &[]);
-            pass.dispatch_workgroups(GRID.0.div_ceil(8), GRID.1.div_ceil(8), 1);
+            pass.dispatch_workgroups(GRID.0.div_ceil(8), GRID.1.div_ceil(9), 1);
         }
-        enc.copy_buffer_to_buffer(&self.stats, 0, &stage, 0, 8);
+        enc.copy_buffer_to_buffer(&self.stats, 0, &stage, 0, STATS_BYTES);
         gpu.queue.submit(Some(enc.finish()));
         let th = self.thresholds;
         let cells = GRID.0 * GRID.1;
@@ -198,8 +212,8 @@ impl Classifier {
         Some(Readback::tracked(
             &stage,
             Box::new(move |d: &[u8]| {
-                let s: &[u32] = bytemuck::cast_slice(&d[..8]);
-                let c = Classification::from_stats(s[0], s[1], cells, &th).after(last_moving.get(), &th);
+                let s: &[u32] = bytemuck::cast_slice(&d[..STATS_BYTES as usize]);
+                let c = Classification::from_stats(s[0], s[1], cells, &th).with_history(s[2], last_moving.get(), &th);
                 let held = c.kind == IntervalKind::Hold;
                 if !held {
                     last_moving.set(Some(c.mean));

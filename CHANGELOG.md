@@ -10,6 +10,11 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Engine reports include live and peak GPU allocation bytes, with separate totals for frame slots, network buffers,
   cadence scratch, and auxiliary resources.
 
+### Fixed
+
+- Preserve the timing of abrupt flashes, including localized flashes during a pan and flashes immediately after a cut.
+- Preserve thin repeated lines on coherent pans in the texture generator at repair level 2 by aligning the original frames.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added

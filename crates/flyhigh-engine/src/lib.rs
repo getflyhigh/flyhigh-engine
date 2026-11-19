@@ -62,5 +62,6 @@ pub mod api;
 pub mod gen_tex;
 pub mod gmhs;
 pub mod pacer;
+mod pan;
 pub mod stream;
 pub mod warp;

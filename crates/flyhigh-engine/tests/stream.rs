@@ -180,6 +180,78 @@ fn the_classifier_tells_cuts_holds_and_motion_apart() {
 
 #[test]
 #[ignore]
+fn a_local_flash_and_its_clear_frame_are_discontinuities() {
+    let Some(e) = engine() else { return };
+    let mut s = Stream::new(&e.gpu, &e.blob, &e.ops, TexOptions::new(W, H), &StreamOptions::default(), None).unwrap();
+    let original = [48u8, 48, 48, 255].repeat((W * H) as usize);
+    let mut flash = original.clone();
+    for row in flash.as_chunks_mut::<{ (W * 4) as usize }>().0 {
+        for pixel in row[(3 * W) as usize..].as_chunks_mut::<4>().0 {
+            pixel[..3].fill(112);
+        }
+    }
+    write(&e, &s, 0, &original);
+    write(&e, &s, 1, &flash);
+    let onset = s.classify(&e.gpu, 0, 1).unwrap().block(&e.gpu).unwrap();
+    let clear = s.classify(&e.gpu, 1, 0).unwrap().block(&e.gpu).unwrap();
+    assert!(onset.mean < 0.08, "the localized flash is below the ordinary cut threshold");
+    assert_eq!((onset.kind, clear.kind), (IntervalKind::Cut, IntervalKind::Cut));
+}
+
+#[test]
+#[ignore]
+fn a_rigid_pan_keeps_thin_repeated_lines_aligned() {
+    let Some(e) = engine() else { return };
+    let panning = |shift: i32| {
+        let mut rgb = Vec::new();
+        for y in 0..H as i32 {
+            let y = y - shift;
+            for x in 0..W as i32 {
+                let value = if (45..210).contains(&x) && (35..165).contains(&y) && y % 9 < 2 {
+                    216
+                } else {
+                    let edge = x > 26 + y / 4 && y > 21 && y < 148 - x / 7;
+                    if edge {
+                        75
+                    } else {
+                        33
+                    }
+                };
+                rgb.extend_from_slice(&[value, value, value, 255]);
+            }
+        }
+        rgb
+    };
+    let mut opts = TexOptions::new(W, H);
+    opts.repair = 2;
+    opts.iw = 128;
+    opts.ih = 96;
+    for (mode, fast) in [(Mode::Realtime, false), (Mode::Realtime, true), (Mode::Video, false)] {
+        opts.fast_render = fast;
+        opts.linear_t = fast;
+        let stream = StreamOptions { mode, cadence: mode == Mode::Video, ..StreamOptions::default() };
+        let mut s = Stream::new(&e.gpu, &e.blob, &e.ops, opts.clone(), &stream, None).unwrap();
+        write(&e, &s, 0, &panning(0));
+        write(&e, &s, 1, &panning(-8));
+        s.push(&e.gpu, 0, 0.0).unwrap();
+        s.push(&e.gpu, 1, 41.7).unwrap();
+        if mode == Mode::Video {
+            s.resolve_stats(&e.gpu).unwrap();
+            write(&e, &s, 2, &panning(-16));
+            s.push(&e.gpu, 2, 83.4).unwrap();
+            s.resolve_stats(&e.gpu).unwrap();
+        }
+        assert_eq!(s.generate(&e.gpu, 0.5, 0).unwrap(), Generated::Written);
+        let reference = panning(-4);
+        let output = read_output(&e, &s, 0);
+        let interior = (24 * W * 4) as usize..((H - 24) * W * 4) as usize;
+        let error = mae(&output[interior.clone()], &reference[interior]);
+        assert!(error < 1.0, "moving lines should match the known midpoint ({mode:?}, fast={fast}, MAE={error:.3})");
+    }
+}
+
+#[test]
+#[ignore]
 fn realtime_pushes_give_timestamped_intervals_and_mids() {
     let Some(e) = engine() else { return };
     let mut s = Stream::new(&e.gpu, &e.blob, &e.ops, TexOptions::new(W, H), &StreamOptions::default(), None).unwrap();

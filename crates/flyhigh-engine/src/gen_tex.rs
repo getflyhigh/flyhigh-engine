@@ -12,9 +12,11 @@
 use crate::gmhs::{CadenceScratch, PairStats, StatsRun};
 use crate::gpu::memory::Charge;
 use crate::net::build::PlanResources;
+use crate::pan::PanRepair;
 use crate::{gmhs, Blob, Gpu, NetOpts, SessionExt, Step, TimedRun};
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -109,6 +111,7 @@ pub struct GenTex {
     order: [usize; 3],
     stats: [PairStats; 3],
     scratch: Option<CadenceScratch>,
+    pan: Option<RefCell<PanRepair>>,
     slots: Vec<usize>, // last pushed input slots, newest last (<= 3)
     n_pushed: u64,
     pending: Option<PendingPairStats>,
@@ -302,6 +305,8 @@ impl GenTex {
                 warmed_tune = Some(choices);
             }
         }
+        let pan = (opts.repair == 2 && !opts.protection_mask)
+            .then(|| RefCell::new(PanRepair::new(gpu, opts.w, opts.h, &sess)));
         let scratch = if cadence {
             Some(CadenceScratch::new(gpu, &sess[0]).context("cadence: GMHS maps missing")?)
         } else {
@@ -316,6 +321,7 @@ impl GenTex {
             order: [0, 1, 2],
             stats: [PairStats::default(); 3],
             scratch,
+            pan,
             slots: Vec::new(),
             n_pushed: 0,
             pending: None,
@@ -386,6 +392,29 @@ impl GenTex {
         self.scratch.is_some()
     }
 
+    fn pair_steps(&self, gpu: &Gpu, pair: usize, a: usize, b: usize) -> Vec<Step> {
+        let (a, b) = ((a, &self.ins[a].1), (b, &self.ins[b].1));
+        let mut steps = self.sess[pair].pair_steps_views(gpu, a, b);
+        if let Some(pan) = &self.pan {
+            pan.borrow_mut().search(gpu, pair, a, b, &mut steps);
+        }
+        steps
+    }
+
+    fn repair_pan(&self, gpu: &Gpu, steps: &mut Vec<Step>, pair: usize, slots: (usize, usize), out: usize, t: f32) {
+        if let Some(pan) = &self.pan {
+            let (a, b) = slots;
+            steps.push(pan.borrow_mut().render(
+                gpu,
+                pair,
+                (a, &self.ins[a].1),
+                (b, &self.ins[b].1),
+                (out, &self.outs[out].1),
+                t,
+            ));
+        }
+    }
+
     /// The host wrote the newest source frame into input slot `slot`: run its pair. Video + cadence: the pair's
     /// statistics readback is started; call `take_stats()` (native) or await it (browser) before generating.
     pub fn push_slot(&mut self, gpu: &Gpu, slot: usize) -> Result<PushInfo> {
@@ -412,14 +441,14 @@ impl GenTex {
         };
         match self.opts.mode {
             TexMode::Realtime => {
-                let steps = self.sess[0].pair_steps_views(gpu, (prev, &self.ins[prev].1), (slot, &self.ins[slot].1));
+                let steps = self.pair_steps(gpu, 0, prev, slot);
                 let run = run(gpu, &steps, timed);
                 Ok((PushInfo { ready: true, base_slot: prev, real_replaced: false }, run))
             }
             TexMode::Video => {
                 self.order.rotate_left(1);
                 let sn = self.order[2];
-                let steps = self.sess[sn].pair_steps_views(gpu, (prev, &self.ins[prev].1), (slot, &self.ins[slot].1));
+                let steps = self.pair_steps(gpu, sn, prev, slot);
                 let run = run(gpu, &steps, timed);
                 self.stats.rotate_left(1);
                 self.stats[2] = PairStats::default();
@@ -506,13 +535,14 @@ impl GenTex {
         let s = &self.sess[0];
         let (sa, sb) = (self.slots[self.slots.len() - 2], self.slots[self.slots.len() - 1]);
         let (a, b, o) = ((sa, &self.ins[sa].1), (sb, &self.ins[sb].1), (out, &self.outs[out].1));
-        let steps = if s.is_fast() && self.opts.linear_t {
+        let mut steps = if s.is_fast() && self.opts.linear_t {
             vec![s.render_tex_step(gpu, a, b, o, Some(0.5))]
         } else if s.is_fast() {
             s.mid_steps_fast(gpu, a, b, o)
         } else {
             s.mid_steps(gpu, out, o.1)
         };
+        self.repair_pan(gpu, &mut steps, 0, (sa, sb), out, 0.5);
         Some(gpu.gpu_time_ms_n(&steps, 5))
     }
     /// GPU time (ms) of the pair stage for the current pair (realtime mode), measured by running it again.
@@ -522,7 +552,7 @@ impl GenTex {
             return None;
         }
         let (sa, sb) = (self.slots[self.slots.len() - 2], self.slots[self.slots.len() - 1]);
-        let steps = self.sess[0].pair_steps_views(gpu, (sa, &self.ins[sa].1), (sb, &self.ins[sb].1));
+        let steps = self.pair_steps(gpu, 0, sa, sb);
         Some(gpu.gpu_time_ms_n(&steps, 3))
     }
     /// Synthesise phase `t` of the current interval into output slot `out`. Returns false when nothing was written
@@ -547,8 +577,8 @@ impl GenTex {
                 }
                 anyhow::ensure!(self.slots.len() >= 2, "realtime mode: push two frames first");
                 let s = &self.sess[0];
-                let run = if s.is_fast() {
-                    let (sa, sb) = (self.slots[self.slots.len() - 2], self.slots[self.slots.len() - 1]);
+                let (sa, sb) = (self.slots[self.slots.len() - 2], self.slots[self.slots.len() - 1]);
+                let (setup, mut steps) = if s.is_fast() {
                     let (a, b) = ((sa, &self.ins[sa].1), (sb, &self.ins[sb].1));
                     if self.opts.linear_t {
                         // the network's t-dependent stage once per pair; each phase is then only a render
@@ -559,16 +589,17 @@ impl GenTex {
                             self.half_done = true;
                             setup
                         };
-                        gpu.submit_optional_timing(&setup, &[s.render_tex_step(gpu, a, b, (out, view), Some(t))], timed)
+                        (setup, vec![s.render_tex_step(gpu, a, b, (out, view), Some(t))])
                     } else {
                         s.set_t(gpu, t);
-                        run(gpu, &s.mid_steps_fast(gpu, a, b, (out, view)), timed)
+                        (Vec::new(), s.mid_steps_fast(gpu, a, b, (out, view)))
                     }
                 } else {
                     s.set_t(gpu, t);
-                    run(gpu, &s.mid_steps(gpu, out, view), timed)
+                    (Vec::new(), s.mid_steps(gpu, out, view))
                 };
-                Ok((true, run))
+                self.repair_pan(gpu, &mut steps, 0, (sa, sb), out, t);
+                Ok((true, gpu.submit_optional_timing(&setup, &steps, timed)))
             }
             TexMode::Video => {
                 anyhow::ensure!(self.slots.len() >= 3, "video mode: push three frames first");
@@ -592,7 +623,9 @@ impl GenTex {
                         }
                         let s = &self.sess[sc_];
                         s.set_t(gpu, t);
-                        Ok((true, run(gpu, &s.mid_steps(gpu, out, view), timed)))
+                        let mut steps = s.mid_steps(gpu, out, view);
+                        self.repair_pan(gpu, &mut steps, sc_, (self.slots[0], self.slots[1]), out, t);
+                        Ok((true, run(gpu, &steps, timed)))
                     }
                 }
             }

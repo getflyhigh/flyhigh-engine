@@ -737,6 +737,12 @@ pub(crate) fn build_network_with(
         env.insert(names(op, "out")[0].clone(), o);
     }
     if let Some(age) = &static_age {
+        if net.repair == 2 {
+            env.insert(
+                "static:age".into(),
+                Tensor { buf: age.clone(), c: 1, h: hp, w: wp, c0: 0, scale: static_frames as f32 },
+            );
+        }
         // the whole padded plane: the padding replicates the frame's edge, so the neighbourhood test stays valid there
         let r = &env["render"];
         assert!(r.c0 == 0 && (r.h, r.w) == (hp, wp), "keep_static: render is not a full-resolution plain tensor");

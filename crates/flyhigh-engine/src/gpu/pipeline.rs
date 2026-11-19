@@ -140,6 +140,9 @@ const KERNELS: &[&str] = &[
     "near_k",
     "near_t",
     "near_apply",
+    "pan_search",
+    "pan_select",
+    "pan_apply",
 ];
 
 /// The kernel's name as the cache holds it, or None for a name that is not a kernel.
@@ -181,6 +184,9 @@ pub(crate) fn kernel_source(name: &str) -> Option<(String, &'static str)> {
         "tex_in" => plain(include_str!("../../../../shaders/tex_in.wgsl"), "main"),
         "tex_out" => plain(include_str!("../../../../shaders/tex_out.wgsl"), "main"),
         "classify" => plain(include_str!("../../../../shaders/classify.wgsl"), "main"),
+        "pan_search" => plain(include_str!("../../../../shaders/pan_search.wgsl"), "main"),
+        "pan_select" => plain(include_str!("../../../../shaders/pan_select.wgsl"), "main"),
+        "pan_apply" => plain(include_str!("../../../../shaders/pan_apply.wgsl"), "main"),
         "implicit2" => plain(include_str!("../../../../shaders/conv_implicit2.wgsl"), "main"),
         "epilogue" => plain(include_str!("../../../../shaders/conv_epilogue.wgsl"), "main"),
         "fused" => plain(include_str!("../../../../shaders/conv_fused.wgsl"), "main"),
