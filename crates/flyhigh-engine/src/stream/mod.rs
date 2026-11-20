@@ -85,8 +85,8 @@ pub struct StreamOptions {
     /// default. Needs repair at least 1 (0 is raised to 1).
     #[option(values = "on, off", c = "cadence (0, 1)")]
     pub cadence: bool,
-    /// A pair whose mean per-channel difference (0 to 1, measured on a 48 x 27 grid) is above the threshold is a scene
-    /// cut: the interval is not interpolated, the source frames are shown. Off = every pair is motion.
+    /// Detects cuts from the mean per-channel difference on a 48 x 27 grid and detects abrupt brightness steps from
+    /// spatially coherent changes. The player shows source frames across these transitions. Off disables both checks.
     #[option(values = "off, or a threshold 0 to 1", c = "scene_cut (threshold, 0 = off)")]
     pub scene_cut: Option<SceneCut>,
     /// A pair whose mean difference is below `mean` and whose most different cell is below `max` is a held frame: shown

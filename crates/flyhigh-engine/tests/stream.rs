@@ -209,7 +209,7 @@ fn a_rigid_pan_keeps_thin_repeated_lines_aligned() {
             for x in 0..W as i32 {
                 let value = if (45..210).contains(&x) && (35..165).contains(&y) && y % 9 < 2 {
                     216
-                } else if (x < 45 || x > 210) && !(24..166).contains(&y) {
+                } else if !(45..=210).contains(&x) && !(24..166).contains(&y) {
                     // Fine detail reaches into the strip visible in just one of the source frames.
                     34 + ((x * 19 + y * 31).rem_euclid(79)) as u8
                 } else {
@@ -266,7 +266,7 @@ fn a_panned_line_with_different_contrast_stays_continuous() {
     let Some(e) = engine() else { return };
     let draw = |shift: u32, value: u8| {
         let mut rgba = frame(shift as f32);
-        for pixel in rgba.chunks_exact_mut(4) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
             let background = 16 + pixel[0] / 4 + pixel[1] / 8 + pixel[2] / 8;
             pixel[..3].fill(background);
         }
