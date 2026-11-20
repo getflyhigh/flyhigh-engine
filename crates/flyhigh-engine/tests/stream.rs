@@ -209,6 +209,9 @@ fn a_rigid_pan_keeps_thin_repeated_lines_aligned() {
             for x in 0..W as i32 {
                 let value = if (45..210).contains(&x) && (35..165).contains(&y) && y % 9 < 2 {
                     216
+                } else if (x < 45 || x > 210) && !(24..166).contains(&y) {
+                    // Fine detail reaches into the strip visible in just one of the source frames.
+                    34 + ((x * 19 + y * 31).rem_euclid(79)) as u8
                 } else {
                     let edge = x > 26 + y / 4 && y > 21 && y < 148 - x / 7;
                     if edge {
@@ -247,6 +250,54 @@ fn a_rigid_pan_keeps_thin_repeated_lines_aligned() {
         let interior = (24 * W * 4) as usize..((H - 24) * W * 4) as usize;
         let error = mae(&output[interior.clone()], &reference[interior]);
         assert!(error < 1.0, "moving lines should match the known midpoint ({mode:?}, fast={fast}, MAE={error:.3})");
+        let strip_bytes = (4 * W * 4) as usize;
+        let top = mae(&output[..strip_bytes], &reference[..strip_bytes]);
+        let bottom = mae(&output[output.len() - strip_bytes..], &reference[reference.len() - strip_bytes..]);
+        assert!(
+            top < 1.0 && bottom < 1.0,
+            "pan edges should use available source ({mode:?}, fast={fast}, MAE={top:.3}/{bottom:.3})"
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn a_panned_line_with_different_contrast_stays_continuous() {
+    let Some(e) = engine() else { return };
+    let draw = |shift: u32, value: u8| {
+        let mut rgba = frame(shift as f32);
+        for pixel in rgba.chunks_exact_mut(4) {
+            let background = 16 + pixel[0] / 4 + pixel[1] / 8 + pixel[2] / 8;
+            pixel[..3].fill(background);
+        }
+        for y in 48..140 {
+            for x in (80 + shift)..(84 + shift) {
+                let offset = ((y * W + x) * 4) as usize;
+                rgba[offset..offset + 3].fill(value);
+            }
+        }
+        rgba
+    };
+    let mut opts = TexOptions::new(W, H);
+    opts.repair = 2;
+    opts.iw = 128;
+    opts.ih = 96;
+    opts.fast_render = true;
+    opts.linear_t = true;
+    let mut s = Stream::new(&e.gpu, &e.blob, &e.ops, opts, &StreamOptions::default(), None).unwrap();
+    write(&e, &s, 0, &draw(0, 210));
+    write(&e, &s, 1, &draw(8, 186));
+    s.push(&e.gpu, 0, 0.0).unwrap();
+    s.push(&e.gpu, 1, 41.7).unwrap();
+    assert_eq!(s.generate(&e.gpu, 0.5, 0).unwrap(), Generated::Written);
+    let output = read_output(&e, &s, 0);
+    for y in 54..134 {
+        let offset = ((y * W + 85) * 4) as usize;
+        assert!(
+            output[offset].abs_diff(198) < 8,
+            "line at row {y} differs from the aligned midpoint: {}",
+            output[offset]
+        );
     }
 }
 

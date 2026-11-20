@@ -7,6 +7,7 @@ struct Search { w: u32, h: u32, width: u32, divisor: u32, initial: u32, finish: 
 
 @compute @workgroup_size(1)
 fn main() {
+    if (search.initial == 0u && fit.z < 0.0) { return; }
     let size = vec2<f32>(f32(search.w), f32(search.h));
     let count = search.width * search.width;
     let center = count / 2u;
@@ -21,5 +22,6 @@ fn main() {
     let still_error = select(fit.w, errors[center], search.initial != 0u);
     let trusted = search.finish != 0u && errors[best] < 0.010 && errors[best] < 0.30 * still_error
         && still_error > 0.016 && length(shift) > 1.0 && all(abs(shift) < size * 0.10);
-    fit = vec4<f32>(shift, select(0.0, 1.0, trusted), still_error);
+    let confidence = select(select(0.0, 1.0, trusted), -1.0, still_error <= 0.016);
+    fit = vec4<f32>(shift, confidence, still_error);
 }

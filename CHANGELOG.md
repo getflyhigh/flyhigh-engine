@@ -5,15 +5,26 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-20
+
 ### Added
 
 - Engine reports include live and peak GPU allocation bytes, with separate totals for frame slots, network buffers,
   cadence scratch, and auxiliary resources.
+- Browser timing reports expose the cost of first-phase setup, frame rendering, and the total on successful samples.
+
+### Changed
+
+- Anime cadence smoothing shares model weights and transient GPU buffers across its three plans, reducing memory use.
+- Low-level Rust buffer allocation APIs now return a tracked `Buffer` that dereferences to `wgpu::Buffer`.
 
 ### Fixed
 
 - Preserve the timing of abrupt flashes, including localized flashes during a pan and flashes immediately after a cut.
-- Preserve thin repeated lines on coherent pans in the texture generator at repair level 2 by aligning the original frames.
+- Preserve thin repeated lines and newly visible frame edges on coherent pans at repair level 2 by aligning the
+  original frames. Local contrast matching keeps lines intact when the two source frames have different brightness.
+- Bound concurrent GPU timestamp readbacks and resolve Metal timestamps after the GPU records them.
+- Attach asynchronous cadence statistics to their original interval so a late result cannot affect playback after a seek.
 
 ## [0.5.0] - 2026-11-18
 

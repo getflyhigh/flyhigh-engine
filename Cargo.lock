@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-capi"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "flyhigh-engine",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-engine"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "ash",
@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-options"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-player"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "flyhigh-engine",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "flyhigh-web"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "console_error_panic_hook",
  "flyhigh-engine",

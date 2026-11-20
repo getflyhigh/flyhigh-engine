@@ -9,9 +9,15 @@ struct Search { w: u32, h: u32, width: u32, divisor: u32, initial: u32, finish: 
 
 const N = 192u;
 var<workgroup> sums: array<f32, 64>;
+var<workgroup> skip: u32;
 
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) candidate: vec3<u32>, @builtin(local_invocation_index) lane: u32) {
+    // A negative flag means the initial zero-shift comparison already ruled out a pan.
+    if (search.initial == 0u) {
+        if (lane == 0u) { skip = u32(fit.z < 0.0); }
+        if (workgroupUniformLoad(&skip) != 0u) { return; }
+    }
     let size = vec2<f32>(f32(search.w), f32(search.h));
     let spacing = max(1.0, size.y / 144.0) / f32(search.divisor);
     let offset = (vec2<f32>(f32(candidate.x % search.width), f32(candidate.x / search.width))
