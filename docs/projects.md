@@ -8,6 +8,7 @@ repository lists it there as well.
 |---|---|---|
 | [Framegen](https://github.com/MONZikWasTaken/Framegen) | browser extension (Chrome, Firefox) | generates frames for any `<video>` on a page; the first host written on the engine's classes alone |
 | [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) | open-source cloud gaming client | frame generation for the game stream in the native client |
+| [Lichii](https://github.com/zortos293/Lichii) | open-source Nintendo Switch emulator | optional frame generation on Windows |
 | [yoru](https://github.com/Tons-7/yoru) | self-hosted anime streaming app | optional frame generation in its browser player |
 
 A badge, if you want one:

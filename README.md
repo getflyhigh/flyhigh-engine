@@ -207,6 +207,9 @@ JavaScript classes change additively. What changed is in the [changelog](CHANGEL
 - **[OpenNOW](https://github.com/OpenCloudGaming/OpenNOW)**: an open-source cloud gaming client whose frame
   generation runs on the engine: in-betweens for the game stream in the native client.
 
+- **[Lichii](https://github.com/zortos293/Lichii)**: an open-source Nintendo Switch emulator with
+  optional frame generation powered by FlyHigh on Windows.
+
 [See all projects](docs/projects.md)
 
 ## Weights
