@@ -215,6 +215,36 @@ fn synth(duration_ms: f64, source_fps: f64, mid_ms: f64, pair_ms: f64, gap: impl
     Trace { version: 1, host: "synthetic".into(), notes: String::new(), options: None, events }
 }
 
+fn with_motion(mut trace: Trace, motion_at: impl Fn(f64) -> f64) -> Trace {
+    for e in &mut trace.events {
+        if let TraceEvent::Source { t, motion, .. } = e {
+            *motion = Some(motion_at(*t));
+        }
+    }
+    trace
+}
+
+#[test]
+fn auto_keeps_its_factor_through_a_run_of_camera_moves() {
+    // 60 fps game footage on a 240 Hz display: a 0.3 s camera move every second and a half. The ceiling that followed
+    // the last few frames sent Auto from x4 to x2 and back at every move.
+    let flicks =
+        with_motion(
+            synth(14_000.0, 60.0, 0.4, 2.0, |_| 1000.0 / 240.0),
+            |t| if t % 1500.0 < 300.0 { 70.0 } else { 8.0 },
+        );
+    let r = run(&flicks, &PacerOptions::default());
+    let factors: Vec<u32> = r.seconds[3..13].iter().map(|s| s.factor).collect();
+    assert!(factors.iter().all(|f| *f == 4), "one factor through the moves: {factors:?}");
+    let presents = presents_per_second(&r, 3);
+    assert!(presents.iter().all(|p| *p >= 230), "every second at the display's rate: {presents:?}");
+    // footage that stays fast is still capped
+    let fast = with_motion(synth(14_000.0, 60.0, 0.4, 2.0, |_| 1000.0 / 240.0), |_| 70.0);
+    let r = run(&fast, &PacerOptions::default());
+    let factors: Vec<u32> = r.seconds[8..13].iter().map(|s| s.factor).collect();
+    assert!(factors.iter().all(|f| *f == 2), "lasting fast motion keeps the low factor: {factors:?}");
+}
+
 fn run(trace: &Trace, opts: &PacerOptions) -> Replay {
     replay(trace, opts).expect("valid options")
 }

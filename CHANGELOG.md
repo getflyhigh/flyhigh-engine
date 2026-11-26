@@ -5,6 +5,14 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Auto's motion ceiling works from the motion of the last three seconds instead of the last few frames. Over game
+  footage the ceiling was crossed at every camera move and Auto went between x2 and x4 of a 60 fps video all the time:
+  on a 240 Hz display consecutive seconds showed 92 to 228 pictures (median 159), an unsteady rate with a hitch at
+  every change. Now a run of camera moves keeps one factor (132 to 237, median 223, on the same clip) and only footage
+  that stays fast is capped. 24 fps anime is unchanged: the recorded sessions replay to the same reports.
+
 ## [0.5.1] - 2026-11-20
 
 ### Added

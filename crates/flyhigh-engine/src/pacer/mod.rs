@@ -342,6 +342,14 @@ const AUTO_GRID_VOTES: u32 = 4;
 /// not: 60 fps on a 75 Hz display shows every fourth frame twice, and 75 pictures at their own media time are even.
 const AUTO_GRID_MIN_RATIO: f64 = 1.15;
 const AUTO_HOLD_MS: f64 = 1000.0;
+/// The time constant of the motion the ceiling works from. The ceiling used to follow the last few frames, and game
+/// footage crosses its thresholds every second or two: Auto then moved between x2 and x4 of a 60 fps video all the
+/// time (measured on a 240 Hz display: 92 to 228 pictures in consecutive seconds, an unsteady rate with hitches at
+/// every change). Averaged over a few seconds the ceiling describes the scene, not one camera move: a run of moves
+/// keeps one factor, and only footage that stays fast is capped.
+const MOTION_CEILING_MS: f64 = 3000.0;
+/// The motion levels of the ceiling (mean cell difference): above them Auto's factor is capped at 4, 3 and 2.
+const MOTION_LEVELS: [f64; 3] = [16.0, 28.0, 45.0];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counters {
@@ -460,6 +468,9 @@ pub struct Pacer {
     late_tail_ms: f64,
     late_tail_t: f64,
     motion_avg: f64,
+    /// The motion the ceiling works from: the average over `MOTION_CEILING_MS`, and when it was last updated.
+    motion_ceiling: f64,
+    motion_ceiling_at: f64,
     factor: u32,
     /// Since when Auto has asked for a higher (true) or a lower factor than the one in use.
     auto_candidate: Option<(bool, f64)>,
@@ -509,6 +520,8 @@ impl Pacer {
             late_tail_ms: 0.0,
             late_tail_t: 0.0,
             motion_avg: 0.0,
+            motion_ceiling: 0.0,
+            motion_ceiling_at: f64::NEG_INFINITY,
             factor: 2,
             auto_candidate: None,
             auto_changed_at: f64::NEG_INFINITY,
@@ -561,6 +574,8 @@ impl Pacer {
         self.late_avg = 0.0;
         self.late_tail_ms = 0.0;
         self.motion_avg = 0.0;
+        self.motion_ceiling = 0.0;
+        self.motion_ceiling_at = f64::NEG_INFINITY;
         self.auto_candidate = None;
         self.auto_changed_at = f64::NEG_INFINITY;
         self.last_pts = None;
@@ -1070,11 +1085,11 @@ impl Pacer {
         let by_gpu = 1.0 + ((0.85 * interval - self.pair_cost()) / self.mid_cost().max(0.01)).max(0.0);
         let by_motion = if !self.opts.motion_adaptive {
             f64::INFINITY
-        } else if self.motion_avg > 45.0 {
+        } else if self.motion_ceiling > MOTION_LEVELS[2] {
             2.5
-        } else if self.motion_avg > 28.0 {
+        } else if self.motion_ceiling > MOTION_LEVELS[1] {
             3.75
-        } else if self.motion_avg > 16.0 {
+        } else if self.motion_ceiling > MOTION_LEVELS[0] {
             5.0
         } else {
             f64::INFINITY
@@ -1161,7 +1176,7 @@ impl Pacer {
             limit_to_display: self.opts.limit_to_display,
             queue_capacity_hz: self.queue.capacity_hz(self.delay_ms),
             headroom: self.opts.display_headroom,
-            motion_avg: self.motion_avg,
+            motion_avg: self.motion_ceiling,
             motion_adaptive,
             penalty: self.control.penalty(),
         })
@@ -1290,6 +1305,15 @@ impl Pacer {
             if m < 90.0 {
                 self.motion_avg = self.motion_avg * 0.7 + m * 0.3;
             }
+        }
+        if let Some(m) = frame.motion.filter(|m| *m < 90.0) {
+            if self.motion_ceiling_at == f64::NEG_INFINITY {
+                self.motion_ceiling = m;
+            } else {
+                let k = 1.0 - (-(now - self.motion_ceiling_at).max(0.0) / MOTION_CEILING_MS).exp();
+                self.motion_ceiling += (m - self.motion_ceiling) * k;
+            }
+            self.motion_ceiling_at = now;
         }
         match frame.kind {
             IntervalKind::Cut => {
