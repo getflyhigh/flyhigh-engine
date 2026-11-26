@@ -5,6 +5,8 @@ follow semantic versioning as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-26
+
 ### Changed
 
 - Auto's motion ceiling works from the motion of the last three seconds instead of the last few frames. Over game
