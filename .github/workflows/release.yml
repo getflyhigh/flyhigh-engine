@@ -105,10 +105,10 @@ jobs:
           if [ -n "$prev" ]; then { echo; echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"; } >> body.md; fi
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: release-assets
           merge-multiple: true
-      - run: ls -la assets
+      - run: ls -la release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: assets/*
+          files: release-assets/*
           body_path: body.md
